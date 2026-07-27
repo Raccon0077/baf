@@ -7,11 +7,29 @@ import requests
 import json
 import os
 import sys
+import gc
+import logging
+
+# ================= НАСТРОЙКА =================
+DATA_DIR = os.environ.get('DATA_DIR', '/app/data')
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+DATA_FILE = os.path.join(DATA_DIR, "apostles_data.json")
+LOCK_FILE = os.path.join(DATA_DIR, "bot.lock")
+
+# ================= ЛОГИРОВАНИЕ =================
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(os.path.join(DATA_DIR, 'bot.log'), encoding='utf-8')
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # ================= БЛОКИРОВКА =================
-LOCK_FILE = "bot.lock"
-
-
 def check_lock():
     if os.path.exists(LOCK_FILE):
         try:
@@ -21,12 +39,12 @@ def check_lock():
                     import subprocess
                     result = subprocess.run(['tasklist', '/FI', f'PID eq {pid}'], capture_output=True, text=True)
                     if str(pid) in result.stdout:
-                        print(f"❌ Бот уже запущен (PID: {pid})!")
+                        logger.error(f"❌ Бот уже запущен (PID: {pid})!")
                         sys.exit(0)
                 else:
                     try:
                         os.kill(int(pid), 0)
-                        print(f"❌ Бот уже запущен (PID: {pid})!")
+                        logger.error(f"❌ Бот уже запущен (PID: {pid})!")
                         sys.exit(0)
                     except OSError:
                         pass
@@ -35,14 +53,14 @@ def check_lock():
 
     with open(LOCK_FILE, 'w') as f:
         f.write(str(os.getpid()))
-    print(f"🔒 Блокировка установлена (PID: {os.getpid()})")
+    logger.info(f"🔒 Блокировка установлена (PID: {os.getpid()})")
 
 
 def remove_lock():
     if os.path.exists(LOCK_FILE):
         try:
             os.remove(LOCK_FILE)
-            print("🔓 Блокировка снята")
+            logger.info("🔓 Блокировка снята")
         except:
             pass
 
@@ -54,15 +72,16 @@ GROUP_ID_MEDEA = 239699656
 MEAD_ID = 212887447
 
 API_URL = "https://welldungeon.online/api/v1/"
+MAX_CACHE_SIZE = 20
+CACHE_TTL = 10
+MAX_RETRIES = 3
+RETRY_DELAY = 5
 
 # ================= ХРАНИЛИЩЕ =================
 apostles_data = {}
 apostles_cache = {}
 apostle_cooldowns = {}
-
-DATA_FILE = "apostles_data.json"
-CACHE_TTL = 10
-
+buff_queue = {}
 
 # ================= ЗАГРУЗКА И СОХРАНЕНИЕ =================
 def load_apostles():
@@ -71,21 +90,50 @@ def load_apostles():
         try:
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 apostles_data = json.load(f)
-                print(f"📂 Загружено {len(apostles_data)} апостолов")
+                logger.info(f"📂 Загружено {len(apostles_data)} апостолов")
         except Exception as e:
-            print(f"Ошибка загрузки данных: {e}")
+            logger.error(f"Ошибка загрузки данных: {e}")
             apostles_data = {}
+    else:
+        apostles_data = {}
+        save_apostles()
+        logger.info("📂 Создан новый файл данных")
 
 
 def save_apostles():
     try:
+        existing_data = {}
+        if os.path.exists(DATA_FILE):
+            try:
+                with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                    existing_data = json.load(f)
+            except:
+                existing_data = {}
+        
+        for user_id, data in apostles_data.items():
+            if user_id in existing_data:
+                existing_data[user_id].update(data)
+            else:
+                existing_data[user_id] = data
+        
         with open(DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(apostles_data, f, ensure_ascii=False, indent=2)
-        print(f"💾 Сохранено {len(apostles_data)} апостолов")
+            json.dump(existing_data, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"💾 Сохранено {len(existing_data)} апостолов")
         return True
     except Exception as e:
-        print(f"Ошибка сохранения данных: {e}")
+        logger.error(f"Ошибка сохранения данных: {e}")
         return False
+
+
+def clean_inactive_apostles():
+    load_apostles()
+    inactive = [uid for uid, data in apostles_data.items() if not data.get('active', False)]
+    if inactive:
+        for uid in inactive:
+            del apostles_data[uid]
+        save_apostles()
+        logger.info(f"🗑️ Удалено {len(inactive)} неактивных апостолов")
 
 
 # ================= БЛАГОСЛОВЕНИЯ =================
@@ -149,29 +197,20 @@ def is_apostle_active(user_id):
 
 
 def get_apostle_race(user_id):
-    """Возвращает расу апостола (например, 'человек-эльф')"""
     apostle = get_apostle_info(user_id)
-    if apostle:
-        return apostle.get('race', '')
-    return ''
+    return apostle.get('race', '') if apostle else ''
 
 
 def get_apostle_races(user_id, limit=2):
-    """
-    Возвращает список рас апостола (максимум limit штук)
-    """
     race_text = get_apostle_race(user_id)
     if not race_text:
         return []
-
     if '-' in race_text:
         parts = race_text.split('-')
         return [part.strip().lower() for part in parts[:limit] if part.strip().lower() in RACE_BLESSINGS]
     else:
         race_text = race_text.strip().lower()
-        if race_text in RACE_BLESSINGS:
-            return [race_text]
-    return []
+        return [race_text] if race_text in RACE_BLESSINGS else []
 
 
 def get_name_from_vk(vk_id):
@@ -184,7 +223,26 @@ def get_name_from_vk(vk_id):
             return name.strip() or f"Апостол_{vk_id}"
         return f"Апостол_{vk_id}"
     except Exception as e:
+        logger.error(f"Ошибка получения имени из ВК: {e}")
         return f"Апостол_{vk_id}"
+
+
+def get_with_retry(url, max_retries=MAX_RETRIES, delay=RETRY_DELAY):
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                return response.json()
+            data = response.json()
+            if data.get('error', {}).get('code') == 'TOO_MANY_REQUESTS':
+                logger.warning(f"⚠️ Лимит запросов, попытка {attempt+1}/{max_retries}, ждём {delay} сек")
+                time.sleep(delay)
+                continue
+            return data
+        except Exception as e:
+            logger.error(f"Ошибка запроса (попытка {attempt+1}): {e}")
+            time.sleep(delay)
+    return None
 
 
 def get_cached_apostle_info(user_id, force=False):
@@ -198,15 +256,19 @@ def get_cached_apostle_info(user_id, force=False):
     if not force and cache['data'] is not None and (current_time - cache['last_update']) < CACHE_TTL:
         return cache['data']
 
+    # Проверяем размер кэша
+    if len(apostles_cache) > MAX_CACHE_SIZE:
+        oldest = min(apostles_cache.keys(), key=lambda x: apostles_cache[x]['last_update'])
+        del apostles_cache[oldest]
+        logger.info(f"🧹 Удалён старый кэш для {oldest}")
+
     token = get_apostle_token(user_id)
     if not token or not is_apostle_active(user_id):
         return None
 
     try:
-        response = requests.get(f"{API_URL}GetCharacterInfo?token={token}", timeout=10)
-        data = response.json()
-
-        if data.get('result') == 1:
+        data = get_with_retry(f"{API_URL}GetCharacterInfo?token={token}")
+        if data and data.get('result') == 1:
             info = data.get('info', {})
             cache['data'] = info
             cache['last_update'] = current_time
@@ -220,11 +282,14 @@ def get_cached_apostle_info(user_id, force=False):
                 apostle['level'] = info.get('level', 0)
                 apostle['race'] = info.get('race', '')
                 save_apostles()
-
+                logger.info(f"🔄 Обновлён {real_name}: голоса {apostle['voices']}")
             return info
         else:
+            if data and data.get('error', {}).get('code') == 'TOO_MANY_REQUESTS':
+                logger.warning("⚠️ Превышен лимит запросов, данные не обновлены")
             return cache['data']
     except Exception as e:
+        logger.error(f"Ошибка получения данных: {e}")
         return cache['data']
 
 
@@ -265,19 +330,16 @@ def get_all_apostles_display():
 
 def get_available_blessings(user_id):
     available = list(BASE_BLESSINGS.keys())
-
     if not is_apostle_active(user_id):
         return available
 
     races = get_apostle_races(user_id, limit=2)
-
     for race in races:
         blessing_name = RACE_TO_BLESSING.get(race)
         if blessing_name:
             available.append(blessing_name)
 
-    available = list(dict.fromkeys(available))
-    return available
+    return list(dict.fromkeys(available))
 
 
 def apply_blessing(user_id, blessing_type, apostle_user_id, vk=None):
@@ -306,6 +368,7 @@ def apply_blessing(user_id, blessing_type, apostle_user_id, vk=None):
                 return False, None
             return False, f"❌ {error_message}"
     except Exception as e:
+        logger.error(f"Ошибка наложения: {e}")
         return False, f"❌ Ошибка: {e}"
 
 
@@ -423,8 +486,7 @@ def parse_blessings(text, available):
                 if shortcut_name in available and shortcut_name not in found:
                     found.append(shortcut_name)
 
-    found = list(dict.fromkeys(found))
-    return found
+    return list(dict.fromkeys(found))
 
 
 def send_reply_to_chat(vk, peer_id, message, reply_to=None):
@@ -437,13 +499,37 @@ def send_reply_to_chat(vk, peer_id, message, reply_to=None):
         )
         return True
     except Exception as e:
-        print(f"[МЕДЕЯ] ❌ {e}")
+        logger.error(f"[МЕДЕЯ] ❌ {e}")
         return False
 
 
-# ================= АВТО-СООБЩЕНИЕ ЕКАТЕРИНЕ =================
+# ================= АВТО-ОЧИСТКА =================
+def memory_cleaner():
+    while True:
+        try:
+            if len(apostles_cache) > MAX_CACHE_SIZE:
+                sorted_keys = sorted(apostles_cache.keys(),
+                                   key=lambda x: apostles_cache[x]['last_update'])
+                for key in sorted_keys[:-10]:
+                    del apostles_cache[key]
+                logger.info(f"🧹 Очищен кэш: стало {len(apostles_cache)}")
+
+            clean_inactive_apostles()
+
+            gc_count = gc.get_count()
+            if gc_count[0] > 700:
+                collected = gc.collect()
+                if collected > 0:
+                    logger.info(f"🧹 Собрано мусора: {collected} объектов")
+
+            time.sleep(30)
+        except Exception as e:
+            logger.error(f"Ошибка очистки: {e}")
+            time.sleep(60)
+
+
+# ================= АВТО-СООБЩЕНИЕ =================
 def send_alive_message(vk):
-    """Отправляет сообщение Екатерине Наумовой о том, что бот жив"""
     try:
         minutes = random.randint(10, 30)
         message = (
@@ -456,16 +542,16 @@ def send_alive_message(vk):
             "• `+апостол [токен]` — активировать апостола\n"
             "• `-апостол` — отключить апостола"
         )
-        
+
         vk.messages.send(
             user_id=MEAD_ID,
             message=message,
             random_id=random.randint(1, 1000000)
         )
-        print(f"📩 Отправлено сообщение Екатерине (следующее через {minutes} мин)")
+        logger.info(f"📩 Отправлено сообщение Екатерине (следующее через {minutes} мин)")
         return minutes * 60
     except Exception as e:
-        print(f"❌ Ошибка отправки сообщения Екатерине: {e}")
+        logger.error(f"Ошибка отправки: {e}")
         return 600
 
 
@@ -473,49 +559,55 @@ def send_alive_message(vk):
 def main():
     check_lock()
     try:
-        print("=" * 50)
-        print("🤖 БОТ ВОПЛОЩЕНИЯ СВЕТА")
-        print("=" * 50)
+        logger.info("=" * 50)
+        logger.info("🤖 БОТ ВОПЛОЩЕНИЯ СВЕТА")
+        logger.info("=" * 50)
 
         load_apostles()
-        print("🔄 Обновление данных всех апостолов...")
+        
+        logger.info("🔄 Обновление данных всех апостолов...")
         for user_id in list(apostles_data.keys()):
             if apostles_data[user_id].get('active', False):
                 try:
                     get_cached_apostle_info(int(user_id), force=True)
                 except Exception as e:
-                    print(f"   ❌ Ошибка обновления {user_id}: {e}")
+                    logger.error(f"   ❌ Ошибка обновления {user_id}: {e}")
 
-        print(f"📌 Всего апостолов в базе: {len(apostles_data)}")
+        logger.info(f"📌 Всего апостолов в базе: {len(apostles_data)}")
         active_count = sum(1 for a in apostles_data.values() if a.get('active', False))
-        print(f"📌 Активных: {active_count}")
-        print("=" * 50)
+        logger.info(f"📌 Активных: {active_count}")
+        logger.info("=" * 50)
 
         vk_session = vk_api.VkApi(token=TOKEN_MEDEA)
         vk = vk_session.get_api()
         longpoll = VkBotLongPoll(vk_session, GROUP_ID_MEDEA)
 
-        # 🔥 Фоновый поток для отправки сообщений Екатерине
+        # Запускаем очистку памяти
+        memory_thread = threading.Thread(target=memory_cleaner, daemon=True)
+        memory_thread.start()
+        logger.info("🧹 Запущена умная очистка памяти")
+
+        # Запускаем авт-сообщения
         def alive_message_loop():
             while True:
                 try:
                     wait_time = send_alive_message(vk)
                     time.sleep(wait_time)
                 except Exception as e:
-                    print(f"❌ Ошибка в цикле alive-сообщений: {e}")
+                    logger.error(f"Ошибка в цикле alive-сообщений: {e}")
                     time.sleep(600)
 
         alive_thread = threading.Thread(target=alive_message_loop, daemon=True)
         alive_thread.start()
-        print("✅ Запущен поток авт-сообщений Екатерине (каждые 10-30 минут)")
+        logger.info("✅ Запущен поток авт-сообщений Екатерине (каждые 10-30 минут)")
 
-        print("✅ Бот запущен!")
-        print("📌 Команды:")
-        print("   • +апостол [токен] — активировать апостола")
-        print("   • -апостол — отключить апостола")
-        print("   • голоса — список всех активных апостолов")
-        print("   • баф [буквы] — наложить благословения")
-        print("=" * 50)
+        logger.info("✅ Бот запущен!")
+        logger.info("📌 Команды:")
+        logger.info("   • +апостол [токен] — активировать апостола")
+        logger.info("   • -апостол — отключить апостола")
+        logger.info("   • голоса — список всех активных апостолов")
+        logger.info("   • баф [буквы] — наложить благословения")
+        logger.info("=" * 50)
 
         for event in longpoll.listen():
             if event.type == VkBotEventType.MESSAGE_NEW:
@@ -545,9 +637,8 @@ def main():
                                     del apostles_cache[str_user_id]
 
                                 try:
-                                    check_response = requests.get(f"{API_URL}TokenInfo?token={token}", timeout=10)
-                                    check_data = check_response.json()
-                                    if check_data.get('result') == 1:
+                                    check_response = get_with_retry(f"{API_URL}TokenInfo?token={token}")
+                                    if check_response and check_response.get('result') == 1:
                                         get_cached_apostle_info(user_id, force=True)
                                         try:
                                             vk.messages.send(
@@ -556,7 +647,7 @@ def main():
                                                 random_id=random.randint(1, 1000000)
                                             )
                                         except Exception as e:
-                                            print(f"Ошибка отправки: {e}")
+                                            logger.error(f"Ошибка отправки: {e}")
                                     else:
                                         apostles_data[str_user_id]['active'] = False
                                         save_apostles()
@@ -588,7 +679,7 @@ def main():
                                     random_id=random.randint(1, 1000000)
                                 )
                             except Exception as e:
-                                print(f"Ошибка отправки: {e}")
+                                logger.error(f"Ошибка отправки: {e}")
                         else:
                             send_reply_to_chat(vk, peer_id, "❌ У тебя нет активного апостола!", reply_to=message_id)
 
@@ -646,10 +737,10 @@ def main():
                         send_reply_to_chat(vk, peer_id, help_text, reply_to=message_id)
 
                 except Exception as e:
-                    print(f"❌ Ошибка: {e}")
+                    logger.error(f"❌ Ошибка: {e}")
 
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        logger.error(f"❌ Ошибка: {e}")
     finally:
         remove_lock()
 
