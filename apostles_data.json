@@ -1,0 +1,20 @@
+{
+  "191741554": {
+    "token": "wd1_live_MyTrGQNA5rQ0KgK3iCzU4xpX8nWfh9J8ghwA1vYGg7v0K9pFTsnFCMm8HLiTjVmE",
+    "active": true,
+    "name": "Даниил Юшков",
+    "voices": 19,
+    "level": 160,
+    "max_voices": 71,
+    "race": "человек-эльф"
+  },
+  "212887447": {
+    "token": "wd1_live_9zaq9tdbut8ayvh16gzmuvaryba9rygx8gomwk1bv2vuef5utocd3thop3xpp0al",
+    "active": true,
+    "name": "Екатерина Наумова",
+    "voices": 56,
+    "level": 550,
+    "max_voices": 92,
+    "race": "человек-эльф-гоблин"
+  }
+}
