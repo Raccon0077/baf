@@ -10,22 +10,14 @@ import sys
 import gc
 import logging
 
-# ================= НАСТРОЙКА =================
-DATA_DIR = os.environ.get('DATA_DIR', '/app/data')
-if not os.path.exists(DATA_DIR):
-    os.makedirs(DATA_DIR, exist_ok=True)
-
-DATA_FILE = os.path.join(DATA_DIR, "apostles_data.json")
-LOCK_FILE = os.path.join(DATA_DIR, "bot.lock")
+# ================= КОНФИГУРАЦИЯ (СТАРЫЙ ПУТЬ) =================
+DATA_FILE = "apostles_data.json"
+LOCK_FILE = "bot.lock"
 
 # ================= ЛОГИРОВАНИЕ =================
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(os.path.join(DATA_DIR, 'bot.log'), encoding='utf-8')
-    ]
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
@@ -91,13 +83,16 @@ def load_apostles():
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 apostles_data = json.load(f)
                 logger.info(f"📂 Загружено {len(apostles_data)} апостолов")
+                return True
         except Exception as e:
             logger.error(f"Ошибка загрузки данных: {e}")
             apostles_data = {}
+            return False
     else:
+        logger.warning(f"⚠️ Файл {DATA_FILE} не найден, создаю новый")
         apostles_data = {}
         save_apostles()
-        logger.info("📂 Создан новый файл данных")
+        return True
 
 
 def save_apostles():
@@ -134,6 +129,8 @@ def clean_inactive_apostles():
             del apostles_data[uid]
         save_apostles()
         logger.info(f"🗑️ Удалено {len(inactive)} неактивных апостолов")
+    else:
+        logger.info("✅ Нет неактивных апостолов для удаления")
 
 
 # ================= БЛАГОСЛОВЕНИЯ =================
@@ -256,7 +253,6 @@ def get_cached_apostle_info(user_id, force=False):
     if not force and cache['data'] is not None and (current_time - cache['last_update']) < CACHE_TTL:
         return cache['data']
 
-    # Проверяем размер кэша
     if len(apostles_cache) > MAX_CACHE_SIZE:
         oldest = min(apostles_cache.keys(), key=lambda x: apostles_cache[x]['last_update'])
         del apostles_cache[oldest]
@@ -582,12 +578,10 @@ def main():
         vk = vk_session.get_api()
         longpoll = VkBotLongPoll(vk_session, GROUP_ID_MEDEA)
 
-        # Запускаем очистку памяти
         memory_thread = threading.Thread(target=memory_cleaner, daemon=True)
         memory_thread.start()
         logger.info("🧹 Запущена умная очистка памяти")
 
-        # Запускаем авт-сообщения
         def alive_message_loop():
             while True:
                 try:
