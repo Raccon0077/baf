@@ -315,11 +315,8 @@ def get_all_apostles_display():
             result.append(f"🦝 {race_short} {name} {voices}")
     return result
 
-# ================= ДОСТУПНЫЕ БАФФЫ =================
 def get_available_blessings(user_id):
     available = list(BASE_BLESSINGS.keys())
-    
-    # Все расовые баффы всегда доступны
     available.append("человека")
     available.append("эльфа")
     available.append("орка")
@@ -327,31 +324,12 @@ def get_available_blessings(user_id):
     available.append("гнома")
     available.append("демона")
     available.append("нежити")
-
-    logger.info(f"🔍 Доступные баффы: {available}")
     return list(dict.fromkeys(available))
 
-# ================= ФУНКЦИЯ НАЛОЖЕНИЯ С ПРОВЕРКОЙ РАСЫ =================
 def apply_blessing(user_id, blessing_type, apostle_user_id, vk=None):
     token = get_apostle_token(apostle_user_id)
     if not token or not is_apostle_active(apostle_user_id):
         return False, f"❌ Апостол {apostle_user_id} не активен!"
-
-    # 🔥 Проверяем, не является ли бафф расовым и не совпадает ли с расой цели
-    target_info = get_apostle_info(user_id)
-    if target_info:
-        target_race = target_info.get('race', '')
-        # Проверяем, является ли бафф расовым
-        is_race_buff = False
-        race_name = None
-        for race, bless in RACE_BLESSINGS.items():
-            if RACE_TO_BLESSING[race] == blessing_type:
-                is_race_buff = True
-                race_name = race
-                break
-        
-        if is_race_buff and race_name and race_name in target_race.lower():
-            return False, f"⚠️ У цели уже есть раса {race_name}, бафф не требуется"
 
     try:
         response = requests.post(
@@ -386,18 +364,7 @@ def apply_blessing(user_id, blessing_type, apostle_user_id, vk=None):
             error = data.get('error', {})
             error_message = error.get('message', 'Ошибка')
             if "уже действует" in error_message or "already active" in error_message:
-                return False, None
-            
-            if vk:
-                try:
-                    vk.messages.send(
-                        user_id=MEAD_ID,
-                        message=f"❌ **{apostle_name}** НЕ смог наложить **{blessing_type}** на **{target_name}** (ID: {user_id})\nОшибка: {error_message}",
-                        random_id=random.randint(1, 1000000)
-                    )
-                except Exception as e:
-                    logger.error(f"Ошибка отправки в личку: {e}")
-            
+                return False, "уже действует"
             return False, f"❌ {error_message}"
     except Exception as e:
         return False, f"❌ Ошибка: {e}"
@@ -447,57 +414,76 @@ def process_buff_queue(vk):
                 blessing_name = queue_data['blessings'][queue_data['current_index']]
                 bless_type = ALL_BLESSINGS.get(blessing_name)
                 
-                if bless_type:
-                    # 🔥 ПРОВЕРЯЕМ, НУЖЕН ЛИ ЭТОТ БАФФ
-                    target_info = get_apostle_info(user_id)
-                    if target_info:
-                        target_race = target_info.get('race', '')
-                        # Проверяем, является ли бафф расовым
-                        is_race_buff = False
-                        race_name = None
-                        for race, bless in RACE_BLESSINGS.items():
-                            if RACE_TO_BLESSING[race] == blessing_name:
-                                is_race_buff = True
-                                race_name = race
-                                break
-                        
-                        if is_race_buff and race_name and race_name in target_race.lower():
-                            # Пропускаем этот бафф
-                            queue_data['current_index'] += 1
-                            queue_data['last_time'] = current_time
-                            send_reply_to_chat(
-                                vk, user_id,
-                                f"⏭️ {blessing_name} пропущен (у цели уже есть раса {race_name})"
-                            )
-                            continue
-                    
-                    sorted_apostles = get_sorted_apostles_for_user(user_id)
-                    success = False
-                    
-                    for apostle in sorted_apostles:
-                        apostle_id = apostle['user_id']
-                        str_apostle_id = str(apostle_id)
-                        
-                        if str_apostle_id in apostle_cooldowns:
-                            if current_time - apostle_cooldowns[str_apostle_id] < 60:
-                                continue
-                        
-                        success, result = apply_blessing(user_id, bless_type, apostle_id, vk)
-                        
-                        if success:
-                            apostle_cooldowns[str_apostle_id] = time.time()
-                            queue_data['current_index'] += 1
-                            queue_data['last_time'] = current_time
-                            
-                            remaining = len(queue_data['blessings']) - queue_data['current_index']
-                            send_reply_to_chat(
-                                vk, user_id,
-                                f"✅ {blessing_name} наложен! Осталось в очереди: {remaining}"
-                            )
+                if not bless_type:
+                    queue_data['current_index'] += 1
+                    continue
+                
+                # Проверяем, не расовый ли бафф и не совпадает ли с расой цели
+                target_info = get_apostle_info(user_id)
+                if target_info:
+                    target_race = target_info.get('race', '')
+                    is_race_buff = False
+                    race_name = None
+                    for race, bless in RACE_BLESSINGS.items():
+                        if RACE_TO_BLESSING[race] == blessing_name:
+                            is_race_buff = True
+                            race_name = race
                             break
                     
-                    if not success:
-                        queue_data['last_time'] = current_time - 55
+                    if is_race_buff and race_name and race_name in target_race.lower():
+                        queue_data['current_index'] += 1
+                        queue_data['last_time'] = current_time
+                        send_reply_to_chat(
+                            vk, user_id,
+                            f"⏭️ {blessing_name} пропущен (у цели уже есть раса {race_name})"
+                        )
+                        continue
+                
+                sorted_apostles = get_sorted_apostles_for_user(user_id)
+                success = False
+                
+                for apostle in sorted_apostles:
+                    apostle_id = apostle['user_id']
+                    str_apostle_id = str(apostle_id)
+                    
+                    if str_apostle_id in apostle_cooldowns:
+                        if current_time - apostle_cooldowns[str_apostle_id] < 60:
+                            continue
+                    
+                    success, result = apply_blessing(user_id, bless_type, apostle_id, vk)
+                    
+                    if success:
+                        apostle_cooldowns[str_apostle_id] = time.time()
+                        queue_data['current_index'] += 1
+                        queue_data['last_time'] = current_time
+                        
+                        remaining = len(queue_data['blessings']) - queue_data['current_index']
+                        send_reply_to_chat(
+                            vk, user_id,
+                            f"✅ {blessing_name} наложен! Осталось в очереди: {remaining}"
+                        )
+                        break
+                    elif result and "уже действует" in str(result):
+                        queue_data['current_index'] += 1
+                        queue_data['last_time'] = current_time
+                        send_reply_to_chat(
+                            vk, user_id,
+                            f"⏭️ {blessing_name} пропущен (уже действует)"
+                        )
+                        success = True
+                        break
+                    else:
+                        # Если ошибка, но не "уже действует" — пробуем следующего апостола
+                        continue
+                
+                # Если ни один апостол не смог наложить
+                if not success:
+                    queue_data['current_index'] += 1
+                    queue_data['last_time'] = current_time
+                    send_reply_to_chat(
+                        vk, user_id,
+                        f"⏭️ {blessing_name} пропущен (не удалось наложить)"
+                    )
             
             time.sleep(5)
         except Exception as e:
@@ -765,45 +751,4 @@ def main():
                         send_reply_to_chat(
                             vk, peer_id,
                             f"📋 **Благословения добавлены в очередь!**\n"
-                            f"📌 {', '.join(blessings)}\n"
-                            f"⏳ Всего в очереди: {queue_count}",
-                            reply_to=message_id
-                        )
-
-                    elif msg in ['бот', 'помощь', 'help', '/help']:
-                        help_text = (
-                            "⚔️ **Команды Воплощения Света**\n\n"
-                            "📩 `+апостол [токен]` — активировать апостола\n"
-                            "   🔑 Токен должен начинаться с `wd1_live_`\n"
-                            "⛔ `-апостол` — отключить апостола\n"
-                            "🔊 `голоса` — список всех активных апостолов\n\n"
-                            "🔥 **Баффы (автоматическая очередь, КД 60 сек):**\n"
-                            "• `баф а` — атака\n"
-                            "• `баф з` — защита\n"
-                            "• `баф у` — удача\n"
-                            "• `баф ч` — человек\n"
-                            "• `баф э` — эльф\n"
-                            "• `баф о` — орк\n"
-                            "• `баф г` — гоблин\n"
-                            "• `баф в` — гном\n"
-                            "• `баф д` — демон\n"
-                            "• `баф н` — нежить\n\n"
-                            "📋 **Примеры:**\n"
-                            "• `баф уаз` — удача, атака, защита\n"
-                            "• `баф ауэ` — атака, удача, эльф\n"
-                            "• `баф уазэ` — удача, атака, защита, эльф\n\n"
-                            "⏳ КД между баффами: 60 секунд\n"
-                            "🔄 Баффы накладываются автоматически"
-                        )
-                        send_reply_to_chat(vk, peer_id, help_text, reply_to=message_id)
-
-                except Exception as e:
-                    logger.error(f"❌ Ошибка: {e}")
-
-    except Exception as e:
-        logger.error(f"❌ Ошибка: {e}")
-    finally:
-        remove_lock()
-
-if __name__ == "__main__":
-    main()
+                            f"📌 {', '.join(bless
