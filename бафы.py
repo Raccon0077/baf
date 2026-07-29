@@ -315,11 +315,11 @@ def get_all_apostles_display():
             result.append(f"🦝 {race_short} {name} {voices}")
     return result
 
-# ================= 🔥 ИСПРАВЛЕННАЯ ФУНКЦИЯ (ВСЕ РАСЫ ВСЕГДА ДОСТУПНЫ) =================
+# ================= ДОСТУПНЫЕ БАФФЫ =================
 def get_available_blessings(user_id):
     available = list(BASE_BLESSINGS.keys())
     
-    # 🔥 ВСЕ РАСОВЫЕ БАФФЫ ВСЕГДА ДОСТУПНЫ
+    # Все расовые баффы всегда доступны
     available.append("человека")
     available.append("эльфа")
     available.append("орка")
@@ -331,10 +331,27 @@ def get_available_blessings(user_id):
     logger.info(f"🔍 Доступные баффы: {available}")
     return list(dict.fromkeys(available))
 
+# ================= ФУНКЦИЯ НАЛОЖЕНИЯ С ПРОВЕРКОЙ РАСЫ =================
 def apply_blessing(user_id, blessing_type, apostle_user_id, vk=None):
     token = get_apostle_token(apostle_user_id)
     if not token or not is_apostle_active(apostle_user_id):
         return False, f"❌ Апостол {apostle_user_id} не активен!"
+
+    # 🔥 Проверяем, не является ли бафф расовым и не совпадает ли с расой цели
+    target_info = get_apostle_info(user_id)
+    if target_info:
+        target_race = target_info.get('race', '')
+        # Проверяем, является ли бафф расовым
+        is_race_buff = False
+        race_name = None
+        for race, bless in RACE_BLESSINGS.items():
+            if RACE_TO_BLESSING[race] == blessing_type:
+                is_race_buff = True
+                race_name = race
+                break
+        
+        if is_race_buff and race_name and race_name in target_race.lower():
+            return False, f"⚠️ У цели уже есть раса {race_name}, бафф не требуется"
 
     try:
         response = requests.post(
@@ -410,6 +427,7 @@ def get_sorted_apostles_for_user(target_user_id):
     active_apostles.sort(key=lambda x: (x['is_on_cooldown'], -x['voices']))
     return active_apostles
 
+# ================= ИСПРАВЛЕННАЯ ОБРАБОТКА ОЧЕРЕДИ =================
 def process_buff_queue(vk):
     while True:
         try:
@@ -430,6 +448,29 @@ def process_buff_queue(vk):
                 bless_type = ALL_BLESSINGS.get(blessing_name)
                 
                 if bless_type:
+                    # 🔥 ПРОВЕРЯЕМ, НУЖЕН ЛИ ЭТОТ БАФФ
+                    target_info = get_apostle_info(user_id)
+                    if target_info:
+                        target_race = target_info.get('race', '')
+                        # Проверяем, является ли бафф расовым
+                        is_race_buff = False
+                        race_name = None
+                        for race, bless in RACE_BLESSINGS.items():
+                            if RACE_TO_BLESSING[race] == blessing_name:
+                                is_race_buff = True
+                                race_name = race
+                                break
+                        
+                        if is_race_buff and race_name and race_name in target_race.lower():
+                            # Пропускаем этот бафф
+                            queue_data['current_index'] += 1
+                            queue_data['last_time'] = current_time
+                            send_reply_to_chat(
+                                vk, user_id,
+                                f"⏭️ {blessing_name} пропущен (у цели уже есть раса {race_name})"
+                            )
+                            continue
+                    
                     sorted_apostles = get_sorted_apostles_for_user(user_id)
                     success = False
                     
