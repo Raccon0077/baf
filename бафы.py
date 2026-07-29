@@ -70,7 +70,7 @@ RETRY_DELAY = 5
 apostles_data = {}
 apostles_cache = {}
 apostle_cooldowns = {}
-buff_queue = {}
+buff_queue = {}  # {user_id: {'blessings': [...], 'current_index': 0, 'last_time': 0}}
 
 # ================= ЗАГРУЗКА И СОХРАНЕНИЕ =================
 def load_apostles():
@@ -79,6 +79,11 @@ def load_apostles():
         try:
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 apostles_data = json.load(f)
+                # 🔥 УДАЛЯЕМ ЕКАТЕРИНУ ИЗ АПОСТОЛОВ (она только управляет)
+                if "212887447" in apostles_data:
+                    del apostles_data["212887447"]
+                    save_apostles()
+                    logger.info("🗑️ Екатерина Наумова удалена из списка апостолов")
                 logger.info(f"📂 Загружено {len(apostles_data)} апостолов")
                 return True
         except Exception as e:
@@ -100,6 +105,10 @@ def save_apostles():
                     existing_data = json.load(f)
             except:
                 existing_data = {}
+        
+        # 🔥 УДАЛЯЕМ ЕКАТЕРИНУ ПРИ СОХРАНЕНИИ
+        if "212887447" in existing_data:
+            del existing_data["212887447"]
         
         for user_id, data in apostles_data.items():
             if user_id in existing_data:
@@ -323,7 +332,6 @@ def get_available_blessings(user_id):
 
     return list(dict.fromkeys(available))
 
-# ================= ФУНКЦИЯ НАЛОЖЕНИЯ С ОТЧЁТОМ В ЛИЧКУ =================
 def apply_blessing(user_id, blessing_type, apostle_user_id, vk=None):
     token = get_apostle_token(apostle_user_id)
     if not token or not is_apostle_active(apostle_user_id):
@@ -341,7 +349,6 @@ def apply_blessing(user_id, blessing_type, apostle_user_id, vk=None):
         )
         data = response.json()
 
-        # 🔥 Получаем имена для отчёта
         apostle_info = get_apostle_info(apostle_user_id)
         apostle_name = apostle_info.get('name', f"Апостол_{apostle_user_id}") if apostle_info else f"Апостол_{apostle_user_id}"
         
@@ -349,7 +356,6 @@ def apply_blessing(user_id, blessing_type, apostle_user_id, vk=None):
         target_name = target_info.get('name', f"Пользователь_{user_id}") if target_info else f"Пользователь_{user_id}"
 
         if data.get('result') == 1:
-            # 🔥 ОТПРАВЛЯЕМ В ЛИЧКУ МЕДЕИ
             if vk:
                 try:
                     vk.messages.send(
@@ -366,7 +372,6 @@ def apply_blessing(user_id, blessing_type, apostle_user_id, vk=None):
             if "уже действует" in error_message or "already active" in error_message:
                 return False, None
             
-            # 🔥 ОТПРАВЛЯЕМ ОШИБКУ В ЛИЧКУ МЕДЕИ
             if vk:
                 try:
                     vk.messages.send(
@@ -406,62 +411,66 @@ def get_sorted_apostles_for_user(target_user_id):
     active_apostles.sort(key=lambda x: (x['is_on_cooldown'], -x['voices']))
     return active_apostles
 
-def apply_buffs_round_robin(target_user_id, blessings, vk):
-    if not blessings:
-        return []
-
-    results = []
-    blessings_queue = blessings.copy()
-    max_attempts = len(blessings_queue) * len(apostles_data) * 2
-    attempts = 0
-
-    while blessings_queue and attempts < max_attempts:
-        attempts += 1
-
-        sorted_apostles = get_sorted_apostles_for_user(target_user_id)
-        if not sorted_apostles:
-            results.append("❌ Нет доступных апостолов!")
-            break
-
-        blessing_name = blessings_queue[0]
-        bless_type = ALL_BLESSINGS.get(blessing_name)
-        if not bless_type:
-            blessings_queue.pop(0)
-            continue
-
-        success = False
-        for apostle in sorted_apostles:
-            apostle_id = apostle['user_id']
-            str_apostle_id = str(apostle_id)
-
-            if str_apostle_id in apostle_cooldowns:
-                if time.time() - apostle_cooldowns[str_apostle_id] < 60:
+def process_buff_queue(vk):
+    """Фоновый процесс для автоматического наложения баффов"""
+    while True:
+        try:
+            current_time = time.time()
+            
+            for str_user_id in list(buff_queue.keys()):
+                user_id = int(str_user_id)
+                queue_data = buff_queue[str_user_id]
+                
+                # Проверяем, есть ли ещё баффы
+                if queue_data['current_index'] >= len(queue_data['blessings']):
+                    del buff_queue[str_user_id]
                     continue
-
-            success, result = apply_blessing(target_user_id, bless_type, apostle_id, vk)
-
-            if success:
-                apostle_cooldowns[str_apostle_id] = time.time()
-                blessings_queue.pop(0)
-                success = True
-                break
-            else:
-                if result is not None:
+                
+                # Проверяем КД (60 секунд)
+                if current_time - queue_data['last_time'] < 60:
                     continue
-
-        if not success:
-            all_on_cooldown = all(
-                str(ap['user_id']) in apostle_cooldowns and
-                time.time() - apostle_cooldowns[str(ap['user_id'])] < 60
-                for ap in sorted_apostles
-            )
-
-            if all_on_cooldown:
-                time.sleep(5)
-            else:
-                blessings_queue.pop(0)
-
-    return results
+                
+                # Берем следующий бафф
+                blessing_name = queue_data['blessings'][queue_data['current_index']]
+                bless_type = ALL_BLESSINGS.get(blessing_name)
+                
+                if bless_type:
+                    # 🔥 Ищем свободного апостола
+                    sorted_apostles = get_sorted_apostles_for_user(user_id)
+                    success = False
+                    
+                    for apostle in sorted_apostles:
+                        apostle_id = apostle['user_id']
+                        str_apostle_id = str(apostle_id)
+                        
+                        if str_apostle_id in apostle_cooldowns:
+                            if current_time - apostle_cooldowns[str_apostle_id] < 60:
+                                continue
+                        
+                        # Пробуем наложить
+                        success, result = apply_blessing(user_id, bless_type, apostle_id, vk)
+                        
+                        if success:
+                            apostle_cooldowns[str_apostle_id] = time.time()
+                            queue_data['current_index'] += 1
+                            queue_data['last_time'] = current_time
+                            
+                            # Отправляем сообщение в чат
+                            remaining = len(queue_data['blessings']) - queue_data['current_index']
+                            send_reply_to_chat(
+                                vk, user_id,
+                                f"✅ {blessing_name} наложен! Осталось в очереди: {remaining}"
+                            )
+                            break
+                    
+                    if not success:
+                        # Если никто не смог наложить, пробуем позже
+                        queue_data['last_time'] = current_time - 55  # увеличиваем интервал
+            
+            time.sleep(5)
+        except Exception as e:
+            logger.error(f"Ошибка обработки очереди: {e}")
+            time.sleep(10)
 
 def parse_blessings(text, available):
     text = text.lower().strip()
@@ -508,7 +517,7 @@ def send_reply_to_chat(vk, peer_id, message, reply_to=None):
         logger.error(f"[МЕДЕЯ] ❌ {e}")
         return False
 
-# ================= АВТО-ОЧИСТКА =================
+# ================= ОСТАЛЬНЫЕ ФУНКЦИИ (memory_cleaner, send_alive_message) =================
 def memory_cleaner():
     while True:
         try:
@@ -532,7 +541,6 @@ def memory_cleaner():
             logger.error(f"Ошибка очистки: {e}")
             time.sleep(60)
 
-# ================= АВТО-СООБЩЕНИЕ =================
 def send_alive_message(vk):
     try:
         message = (
@@ -585,9 +593,14 @@ def main():
         vk = vk_session.get_api()
         longpoll = VkBotLongPoll(vk_session, GROUP_ID_MEDEA)
 
+        # Запускаем фоновые потоки
         memory_thread = threading.Thread(target=memory_cleaner, daemon=True)
         memory_thread.start()
         logger.info("🧹 Запущена умная очистка памяти")
+
+        queue_thread = threading.Thread(target=process_buff_queue, args=(vk,), daemon=True)
+        queue_thread.start()
+        logger.info("📋 Запущен поток автоматической обработки очереди баффов")
 
         def alive_message_loop():
             while True:
@@ -608,7 +621,6 @@ def main():
         logger.info("   • -апостол — отключить апостола")
         logger.info("   • голоса — список всех активных апостолов")
         logger.info("   • баф [буквы] — наложить благословения")
-        logger.info("   • !ботжив — проверить статус бота")
         logger.info("=" * 50)
 
         for event in longpoll.listen():
@@ -626,38 +638,42 @@ def main():
                             token = parts[1]
                             if token.startswith('wd1_live_'):
                                 str_user_id = str(user_id)
-                                apostles_data[str_user_id] = {
-                                    'token': token,
-                                    'active': True,
-                                    'name': 'Апостол',
-                                    'voices': 0,
-                                    'level': 0,
-                                    'race': ''
-                                }
-                                save_apostles()
-                                if str_user_id in apostles_cache:
-                                    del apostles_cache[str_user_id]
+                                # 🔥 НЕ ДОБАВЛЯЕМ ЕКАТЕРИНУ
+                                if str_user_id != "212887447":
+                                    apostles_data[str_user_id] = {
+                                        'token': token,
+                                        'active': True,
+                                        'name': 'Апостол',
+                                        'voices': 0,
+                                        'level': 0,
+                                        'race': ''
+                                    }
+                                    save_apostles()
+                                    if str_user_id in apostles_cache:
+                                        del apostles_cache[str_user_id]
 
-                                try:
-                                    check_response = get_with_retry(f"{API_URL}TokenInfo?token={token}")
-                                    if check_response and check_response.get('result') == 1:
-                                        get_cached_apostle_info(user_id, force=True)
-                                        try:
-                                            vk.messages.send(
-                                                user_id=MEAD_ID,
-                                                message=f"🦝 **Апостол успешно активирован для @id{user_id}!**\n\n✅ Автобафф включён.\n📌 Для отключения используй `-апостол`",
-                                                random_id=random.randint(1, 1000000)
-                                            )
-                                        except Exception as e:
-                                            logger.error(f"Ошибка отправки: {e}")
-                                    else:
+                                    try:
+                                        check_response = get_with_retry(f"{API_URL}TokenInfo?token={token}")
+                                        if check_response and check_response.get('result') == 1:
+                                            get_cached_apostle_info(user_id, force=True)
+                                            try:
+                                                vk.messages.send(
+                                                    user_id=MEAD_ID,
+                                                    message=f"🦝 **Апостол успешно активирован для @id{user_id}!**\n\n✅ Автобафф включён.\n📌 Для отключения используй `-апостол`",
+                                                    random_id=random.randint(1, 1000000)
+                                                )
+                                            except Exception as e:
+                                                logger.error(f"Ошибка отправки: {e}")
+                                        else:
+                                            apostles_data[str_user_id]['active'] = False
+                                            save_apostles()
+                                            send_reply_to_chat(vk, peer_id, "❌ Неверный токен!", reply_to=message_id)
+                                    except Exception as e:
                                         apostles_data[str_user_id]['active'] = False
                                         save_apostles()
-                                        send_reply_to_chat(vk, peer_id, "❌ Неверный токен!", reply_to=message_id)
-                                except Exception as e:
-                                    apostles_data[str_user_id]['active'] = False
-                                    save_apostles()
-                                    send_reply_to_chat(vk, peer_id, f"❌ Ошибка: {e}", reply_to=message_id)
+                                        send_reply_to_chat(vk, peer_id, f"❌ Ошибка: {e}", reply_to=message_id)
+                                else:
+                                    send_reply_to_chat(vk, peer_id, "❌ Екатерина не может быть апостолом!", reply_to=message_id)
                             else:
                                 send_reply_to_chat(vk, peer_id,
                                                    "❌ Неверный формат токена! Токен должен начинаться с `wd1_live_`",
@@ -705,9 +721,18 @@ def main():
                             )
                             continue
 
-                        results = apply_buffs_round_robin(user_id, blessings, vk)
+                        # 🔥 ДОБАВЛЯЕМ В ОЧЕРЕДЬ
+                        str_user_id = str(user_id)
+                        if str_user_id not in buff_queue:
+                            buff_queue[str_user_id] = {
+                                'blessings': blessings,
+                                'current_index': 0,
+                                'last_time': 0
+                            }
+                        else:
+                            buff_queue[str_user_id]['blessings'].extend(blessings)
 
-                        queue_count = len(blessings)
+                        queue_count = len(buff_queue[str_user_id]['blessings']) - buff_queue[str_user_id]['current_index']
                         send_reply_to_chat(
                             vk, peer_id,
                             f"📋 **Благословения добавлены в очередь!**\n"
@@ -716,45 +741,14 @@ def main():
                             reply_to=message_id
                         )
 
-                    elif msg in ['!ботжив', 'бот жив', 'статус']:
-                        try:
-                            api_status = "✅ Работает"
-                            try:
-                                test_response = requests.get(f"{API_URL}TokenInfo?token={TOKEN_MEDEA}", timeout=5)
-                                if test_response.status_code != 200:
-                                    api_status = "⚠️ API не отвечает"
-                            except:
-                                api_status = "⚠️ Ошибка соединения с API"
-                            
-                            data_status = "✅ Есть"
-                            if not os.path.exists(DATA_FILE):
-                                data_status = "❌ Нет файла данных"
-                            
-                            active_count = sum(1 for a in apostles_data.values() if a.get('active', False))
-                            
-                            message = (
-                                "🤖 **Статус бота**\n\n"
-                                f"🟢 Бот: ✅ Жив\n"
-                                f"🔄 API Колодца: {api_status}\n"
-                                f"📂 Файл данных: {data_status}\n"
-                                f"👼 Активных апостолов: {active_count}\n"
-                                f"🕐 Время работы: {time.strftime('%H:%M:%S')}\n\n"
-                                "📌 Для проверки команд используй `голоса` или `баф [буквы]`"
-                            )
-                            send_reply_to_chat(vk, peer_id, message, reply_to=message_id)
-                        except Exception as e:
-                            logger.error(f"Ошибка команды статус: {e}")
-                            send_reply_to_chat(vk, peer_id, f"❌ Ошибка: {e}", reply_to=message_id)
-
                     elif msg in ['бот', 'помощь', 'help', '/help']:
                         help_text = (
                             "⚔️ **Команды Воплощения Света**\n\n"
                             "📩 `+апостол [токен]` — активировать апостола\n"
                             "   🔑 Токен должен начинаться с `wd1_live_`\n"
                             "⛔ `-апостол` — отключить апостола\n"
-                            "🔊 `голоса` — список всех активных апостолов\n"
-                            "🤖 `!ботжив` или `статус` — проверить статус бота\n\n"
-                            "🔥 **Баффы:**\n"
+                            "🔊 `голоса` — список всех активных апостолов\n\n"
+                            "🔥 **Баффы (автоматическая очередь, КД 60 сек):**\n"
                             "• `баф а` — атака\n"
                             "• `баф з` — защита\n"
                             "• `баф у` — удача\n"
@@ -767,9 +761,10 @@ def main():
                             "• `баф н` — нежить\n\n"
                             "📋 **Примеры:**\n"
                             "• `баф уаз` — удача, атака, защита\n"
-                            "• `баф эу` — эльф, удача\n"
+                            "• `баф ауэ` — атака, удача, эльф\n"
                             "• `баф уазэ` — удача, атака, защита, эльф\n\n"
-                            "📩 Отчёты о баффах приходят в личку"
+                            "⏳ КД между баффами: 60 секунд\n"
+                            "🔄 Баффы накладываются автоматически"
                         )
                         send_reply_to_chat(vk, peer_id, help_text, reply_to=message_id)
 
