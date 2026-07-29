@@ -13,7 +13,7 @@ import logging
 # ================= КОНФИГУРАЦИЯ =================
 DATA_FILE = "apostles_data.json"
 LOCK_FILE = "bot.lock"
-ALIVE_INTERVAL = 3600  # 1 час в секундах
+ALIVE_INTERVAL = 3600
 
 # ================= ЛОГИРОВАНИЕ =================
 logging.basicConfig(
@@ -48,7 +48,6 @@ def check_lock():
         f.write(str(os.getpid()))
     logger.info(f"🔒 Блокировка установлена (PID: {os.getpid()})")
 
-
 def remove_lock():
     if os.path.exists(LOCK_FILE):
         try:
@@ -57,13 +56,10 @@ def remove_lock():
         except:
             pass
 
-
 # ================= КОНФИГУРАЦИЯ БОТА =================
 TOKEN_MEDEA = "vk1.a.pWAMTUhJkodcMkUFpCa-UMg_6DKXwr6ISV863itpGw410z1RVSyawnce0r8wMMho0eD5rtIVnrITM22tQbnuqGtnJBZfH5FLopBeT33UG0AUbJI_cEJVbcJEAvOs34dt3PfAA0yiL0sjgabDA88ll9GRCB2nyxiywcI5286nSS-Db2Rn5AAzgp3nkzXfWzkLc4Xf-_vPgUu7pMVJc490Vw"
 GROUP_ID_MEDEA = 239699656
-
 MEAD_ID = 212887447
-
 API_URL = "https://welldungeon.online/api/v1/"
 MAX_CACHE_SIZE = 20
 CACHE_TTL = 10
@@ -95,7 +91,6 @@ def load_apostles():
         save_apostles()
         return True
 
-
 def save_apostles():
     try:
         existing_data = {}
@@ -121,7 +116,6 @@ def save_apostles():
         logger.error(f"Ошибка сохранения данных: {e}")
         return False
 
-
 def clean_inactive_apostles():
     load_apostles()
     inactive = [uid for uid, data in apostles_data.items() if not data.get('active', False)]
@@ -132,7 +126,6 @@ def clean_inactive_apostles():
         logger.info(f"🗑️ Удалено {len(inactive)} неактивных апостолов")
     else:
         logger.info("✅ Нет неактивных апостолов для удаления")
-
 
 # ================= БЛАГОСЛОВЕНИЯ =================
 BASE_BLESSINGS = {
@@ -161,7 +154,7 @@ RACE_TO_BLESSING = {
     "нежить": "нежити"
 }
 
-# 🔥 СОКРАЩЕНИЯ (ВСЕ РАСОВЫЕ БАФФЫ)
+# 🔥 ВСЕ СОКРАЩЕНИЯ (ВКЛЮЧАЯ РАСОВЫЕ)
 SHORTCUTS = {
     "а": "атаки",
     "з": "защиты",
@@ -179,26 +172,21 @@ ALL_BLESSINGS = {**BASE_BLESSINGS}
 for race, bless in RACE_BLESSINGS.items():
     ALL_BLESSINGS[RACE_TO_BLESSING[race]] = bless
 
-
 # ================= РАБОТА С АПОСТОЛАМИ =================
 def get_apostle_info(user_id):
     return apostles_data.get(str(user_id))
-
 
 def get_apostle_token(user_id):
     apostle = get_apostle_info(user_id)
     return apostle.get('token') if apostle else None
 
-
 def is_apostle_active(user_id):
     apostle = get_apostle_info(user_id)
     return apostle.get('active', False) if apostle else False
 
-
 def get_apostle_race(user_id):
     apostle = get_apostle_info(user_id)
     return apostle.get('race', '') if apostle else ''
-
 
 def get_apostle_races(user_id, limit=2):
     race_text = get_apostle_race(user_id)
@@ -210,7 +198,6 @@ def get_apostle_races(user_id, limit=2):
     else:
         race_text = race_text.strip().lower()
         return [race_text] if race_text in RACE_BLESSINGS else []
-
 
 def get_name_from_vk(vk_id):
     try:
@@ -224,7 +211,6 @@ def get_name_from_vk(vk_id):
     except Exception as e:
         logger.error(f"Ошибка получения имени из ВК: {e}")
         return f"Апостол_{vk_id}"
-
 
 def get_with_retry(url, max_retries=MAX_RETRIES, delay=RETRY_DELAY):
     for attempt in range(max_retries):
@@ -242,7 +228,6 @@ def get_with_retry(url, max_retries=MAX_RETRIES, delay=RETRY_DELAY):
             logger.error(f"Ошибка запроса (попытка {attempt+1}): {e}")
             time.sleep(delay)
     return None
-
 
 def get_cached_apostle_info(user_id, force=False):
     str_user_id = str(user_id)
@@ -290,7 +275,6 @@ def get_cached_apostle_info(user_id, force=False):
         logger.error(f"Ошибка получения данных: {e}")
         return cache['data']
 
-
 def get_all_apostles_display():
     result = []
     for str_user_id, data in apostles_data.items():
@@ -325,7 +309,6 @@ def get_all_apostles_display():
             result.append(f"🦝 {race_short} {name} {voices}")
     return result
 
-
 def get_available_blessings(user_id):
     available = list(BASE_BLESSINGS.keys())
 
@@ -340,7 +323,6 @@ def get_available_blessings(user_id):
             available.append(blessing_name)
 
     return list(dict.fromkeys(available))
-
 
 def apply_blessing(user_id, blessing_type, apostle_user_id, vk=None):
     token = get_apostle_token(apostle_user_id)
@@ -371,7 +353,7 @@ def apply_blessing(user_id, blessing_type, apostle_user_id, vk=None):
         logger.error(f"Ошибка наложения: {e}")
         return False, f"❌ Ошибка: {e}"
 
-
+# 🔥 ИСПРАВЛЕННАЯ ФУНКЦИЯ (ВИДИТ ВСЕХ АКТИВНЫХ АПОСТОЛОВ)
 def get_sorted_apostles_for_user(target_user_id):
     active_apostles = []
     current_time = time.time()
@@ -396,7 +378,6 @@ def get_sorted_apostles_for_user(target_user_id):
 
     active_apostles.sort(key=lambda x: (x['is_on_cooldown'], -x['voices']))
     return active_apostles
-
 
 def apply_buffs_round_robin(target_user_id, blessings, vk):
     if not blessings:
@@ -455,7 +436,7 @@ def apply_buffs_round_robin(target_user_id, blessings, vk):
 
     return results
 
-
+# 🔥 ИСПРАВЛЕННЫЙ ПАРСИНГ (ПОДДЕРЖКА ВСЕХ КОМБО)
 def parse_blessings(text, available):
     text = text.lower().strip()
     for prefix in ['баф ', 'баф']:
@@ -491,7 +472,6 @@ def parse_blessings(text, available):
 
     return list(dict.fromkeys(found))
 
-
 def send_reply_to_chat(vk, peer_id, message, reply_to=None):
     try:
         vk.messages.send(
@@ -504,7 +484,6 @@ def send_reply_to_chat(vk, peer_id, message, reply_to=None):
     except Exception as e:
         logger.error(f"[МЕДЕЯ] ❌ {e}")
         return False
-
 
 # ================= АВТО-ОЧИСТКА =================
 def memory_cleaner():
@@ -530,10 +509,8 @@ def memory_cleaner():
             logger.error(f"Ошибка очистки: {e}")
             time.sleep(60)
 
-
-# ================= АВТО-СООБЩЕНИЕ (КАЖДЫЙ ЧАС) =================
+# ================= АВТО-СООБЩЕНИЕ =================
 def send_alive_message(vk):
-    """Отправляет сообщение Екатерине Наумовой о том, что бот жив (раз в час)"""
     try:
         message = (
             "🦝 **Бот жив!**\n\n"
@@ -556,7 +533,6 @@ def send_alive_message(vk):
     except Exception as e:
         logger.error(f"Ошибка отправки сообщения Екатерине: {e}")
         return ALIVE_INTERVAL
-
 
 # ================= ОСНОВНОЙ БОТ =================
 def main():
@@ -608,7 +584,6 @@ def main():
         logger.info("   • -апостол — отключить апостола")
         logger.info("   • голоса — список всех активных апостолов")
         logger.info("   • баф [буквы] — наложить благословения")
-        logger.info("   • !ботжив — проверить статус бота")
         logger.info("=" * 50)
 
         for event in longpoll.listen():
@@ -620,7 +595,6 @@ def main():
                     peer_id = event.message.peer_id
                     msg = message_text.lower().strip()
 
-                    # ===== КОМАНДА "+АПОСТОЛ [ТОКЕН]" =====
                     if msg.startswith('+апостол'):
                         parts = msg.split()
                         if len(parts) >= 2:
@@ -668,7 +642,6 @@ def main():
                                                "❌ Укажи токен после команды!\nПример: `+апостол wd1_live_...`",
                                                reply_to=message_id)
 
-                    # ===== КОМАНДА "-АПОСТОЛ" =====
                     elif msg == '-апостол':
                         str_user_id = str(user_id)
                         if str_user_id in apostles_data:
@@ -687,7 +660,6 @@ def main():
                         else:
                             send_reply_to_chat(vk, peer_id, "❌ У тебя нет активного апостола!", reply_to=message_id)
 
-                    # ===== КОМАНДА "ГОЛОСА" =====
                     elif msg in ['голоса', 'голос']:
                         apostles_list = get_all_apostles_display()
                         if apostles_list:
@@ -696,7 +668,6 @@ def main():
                             response = "❌ Нет активных апостолов!"
                         send_reply_to_chat(vk, peer_id, response, reply_to=message_id)
 
-                    # ===== КОМАНДА "БАФ" =====
                     elif msg.startswith('баф'):
                         available = get_available_blessings(user_id)
                         blessings = parse_blessings(msg, available)
@@ -720,47 +691,14 @@ def main():
                             reply_to=message_id
                         )
 
-                    # ===== КОМАНДА "СТАТУС" =====
-                    elif msg in ['!ботжив', 'бот жив', 'статус']:
-                        try:
-                            api_status = "✅ Работает"
-                            try:
-                                test_response = requests.get(f"{API_URL}TokenInfo?token={TOKEN_MEDEA}", timeout=5)
-                                if test_response.status_code != 200:
-                                    api_status = "⚠️ API не отвечает"
-                            except:
-                                api_status = "⚠️ Ошибка соединения с API"
-                            
-                            data_status = "✅ Есть"
-                            if not os.path.exists(DATA_FILE):
-                                data_status = "❌ Нет файла данных"
-                            
-                            active_count = sum(1 for a in apostles_data.values() if a.get('active', False))
-                            
-                            message = (
-                                "🤖 **Статус бота**\n\n"
-                                f"🟢 Бот: ✅ Жив\n"
-                                f"🔄 API Колодца: {api_status}\n"
-                                f"📂 Файл данных: {data_status}\n"
-                                f"👼 Активных апостолов: {active_count}\n"
-                                f"🕐 Время работы: {time.strftime('%H:%M:%S')}\n\n"
-                                "📌 Для проверки команд используй `голоса` или `баф [буквы]`"
-                            )
-                            send_reply_to_chat(vk, peer_id, message, reply_to=message_id)
-                        except Exception as e:
-                            logger.error(f"Ошибка команды статус: {e}")
-                            send_reply_to_chat(vk, peer_id, f"❌ Ошибка: {e}", reply_to=message_id)
-
-                    # ===== ПОМОЩЬ =====
                     elif msg in ['бот', 'помощь', 'help', '/help']:
                         help_text = (
                             "⚔️ **Команды Воплощения Света**\n\n"
                             "📩 `+апостол [токен]` — активировать апостола\n"
                             "   🔑 Токен должен начинаться с `wd1_live_`\n"
                             "⛔ `-апостол` — отключить апостола\n"
-                            "🔊 `голоса` — список всех активных апостолов\n"
-                            "🤖 `!ботжив` или `статус` — проверить статус бота\n\n"
-                            "🔥 **Баффы:**\n"
+                            "🔊 `голоса` — список всех активных апостолов\n\n"
+                            "🔥 **Баффы (сокращения):**\n"
                             "• `баф а` — атака\n"
                             "• `баф з` — защита\n"
                             "• `баф у` — удача\n"
@@ -782,7 +720,6 @@ def main():
         logger.error(f"❌ Ошибка: {e}")
     finally:
         remove_lock()
-
 
 if __name__ == "__main__":
     main()
