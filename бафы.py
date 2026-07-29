@@ -10,7 +10,7 @@ import sys
 import gc
 import logging
 
-# ================= КОНФИГУРАЦИЯ (СТАРЫЙ ПУТЬ) =================
+# ================= КОНФИГУРАЦИЯ =================
 DATA_FILE = "apostles_data.json"
 LOCK_FILE = "bot.lock"
 ALIVE_INTERVAL = 3600  # 1 час в секундах
@@ -58,7 +58,7 @@ def remove_lock():
             pass
 
 
-# ================= КОНФИГУРАЦИЯ =================
+# ================= КОНФИГУРАЦИЯ БОТА =================
 TOKEN_MEDEA = "vk1.a.pWAMTUhJkodcMkUFpCa-UMg_6DKXwr6ISV863itpGw410z1RVSyawnce0r8wMMho0eD5rtIVnrITM22tQbnuqGtnJBZfH5FLopBeT33UG0AUbJI_cEJVbcJEAvOs34dt3PfAA0yiL0sjgabDA88ll9GRCB2nyxiywcI5286nSS-Db2Rn5AAzgp3nkzXfWzkLc4Xf-_vPgUu7pMVJc490Vw"
 GROUP_ID_MEDEA = 239699656
 
@@ -161,6 +161,7 @@ RACE_TO_BLESSING = {
     "нежить": "нежити"
 }
 
+# 🔥 СОКРАЩЕНИЯ (ВСЕ РАСОВЫЕ БАФФЫ)
 SHORTCUTS = {
     "а": "атаки",
     "з": "защиты",
@@ -327,10 +328,12 @@ def get_all_apostles_display():
 
 def get_available_blessings(user_id):
     available = list(BASE_BLESSINGS.keys())
+
     if not is_apostle_active(user_id):
         return available
 
     races = get_apostle_races(user_id, limit=2)
+    
     for race in races:
         blessing_name = RACE_TO_BLESSING.get(race)
         if blessing_name:
@@ -465,17 +468,20 @@ def parse_blessings(text, available):
     found = []
     remaining = text
 
+    # Сначала ищем полные названия
     for name in available:
         if name in remaining:
             found.append(name)
             remaining = remaining.replace(name, '').strip()
 
+    # Потом ищем по сокращениям
     for shortcut, name in sorted(SHORTCUTS.items(), key=lambda x: -len(x[0])):
         if shortcut in remaining:
             if name in available and name not in found:
                 found.append(name)
                 remaining = remaining.replace(shortcut, '').strip()
 
+    # Если ничего не нашли — пробуем по одной букве
     if not found:
         for char in text:
             if char in SHORTCUTS:
@@ -614,6 +620,7 @@ def main():
                     peer_id = event.message.peer_id
                     msg = message_text.lower().strip()
 
+                    # ===== КОМАНДА "+АПОСТОЛ [ТОКЕН]" =====
                     if msg.startswith('+апостол'):
                         parts = msg.split()
                         if len(parts) >= 2:
@@ -661,6 +668,7 @@ def main():
                                                "❌ Укажи токен после команды!\nПример: `+апостол wd1_live_...`",
                                                reply_to=message_id)
 
+                    # ===== КОМАНДА "-АПОСТОЛ" =====
                     elif msg == '-апостол':
                         str_user_id = str(user_id)
                         if str_user_id in apostles_data:
@@ -712,7 +720,7 @@ def main():
                             reply_to=message_id
                         )
 
-                    # ===== КОМАНДА "!БОТЖИВ" =====
+                    # ===== КОМАНДА "СТАТУС" =====
                     elif msg in ['!ботжив', 'бот жив', 'статус']:
                         try:
                             api_status = "✅ Работает"
@@ -757,7 +765,12 @@ def main():
                             "• `баф з` — защита\n"
                             "• `баф у` — удача\n"
                             "• `баф ч` — человек\n"
-                            "• `баф э` — эльф\n\n"
+                            "• `баф э` — эльф\n"
+                            "• `баф о` — орк\n"
+                            "• `баф г` — гоблин\n"
+                            "• `баф в` — гном\n"
+                            "• `баф д` — демон\n"
+                            "• `баф н` — нежить\n\n"
                             "📋 **Пример:** `баф уаз` — удача, атака, защита"
                         )
                         send_reply_to_chat(vk, peer_id, help_text, reply_to=message_id)
