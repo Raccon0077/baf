@@ -70,7 +70,7 @@ RETRY_DELAY = 5
 apostles_data = {}
 apostles_cache = {}
 apostle_cooldowns = {}
-buff_queue = {}  # {user_id: {'blessings': [...], 'current_index': 0, 'last_time': 0}}
+buff_queue = {}
 
 # ================= ЗАГРУЗКА И СОХРАНЕНИЕ =================
 def load_apostles():
@@ -79,7 +79,7 @@ def load_apostles():
         try:
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 apostles_data = json.load(f)
-                # 🔥 УДАЛЯЕМ ЕКАТЕРИНУ ИЗ АПОСТОЛОВ (она только управляет)
+                # Удаляем Екатерину из апостолов
                 if "212887447" in apostles_data:
                     del apostles_data["212887447"]
                     save_apostles()
@@ -106,7 +106,7 @@ def save_apostles():
             except:
                 existing_data = {}
         
-        # 🔥 УДАЛЯЕМ ЕКАТЕРИНУ ПРИ СОХРАНЕНИИ
+        # Удаляем Екатерину
         if "212887447" in existing_data:
             del existing_data["212887447"]
         
@@ -196,7 +196,7 @@ def get_apostle_race(user_id):
     apostle = get_apostle_info(user_id)
     return apostle.get('race', '') if apostle else ''
 
-def get_apostle_races(user_id, limit=2):
+def get_apostle_races(user_id, limit=3):
     race_text = get_apostle_race(user_id)
     if not race_text:
         return []
@@ -317,19 +317,46 @@ def get_all_apostles_display():
             result.append(f"🦝 {race_short} {name} {voices}")
     return result
 
+# ================= 🔥 ИСПРАВЛЕННАЯ ФУНКЦИЯ (ЧИТАЕТ РАСУ ИЗ ФАЙЛА) =================
 def get_available_blessings(user_id):
     available = list(BASE_BLESSINGS.keys())
 
     if not is_apostle_active(user_id):
         return available
 
-    races = get_apostle_races(user_id, limit=2)
+    # 🔥 БЕРЁМ ДАННЫЕ ИЗ ФАЙЛА
+    apostle = get_apostle_info(user_id)
+    if not apostle:
+        return available
+    
+    race_text = apostle.get('race', '')
+    logger.info(f"🔍 Раса из файла для {user_id}: {race_text}")
+
+    if not race_text:
+        return available
+
+    # 🔥 РАЗБИРАЕМ РАСУ
+    races = []
+    if '-' in race_text:
+        parts = race_text.split('-')
+        for part in parts[:3]:
+            part = part.strip().lower()
+            if part in RACE_BLESSINGS:
+                races.append(part)
+    else:
+        race_text = race_text.strip().lower()
+        if race_text in RACE_BLESSINGS:
+            races.append(race_text)
+
+    logger.info(f"🔍 Расы для {user_id}: {races}")
 
     for race in races:
         blessing_name = RACE_TO_BLESSING.get(race)
         if blessing_name:
             available.append(blessing_name)
+            logger.info(f"   ✅ Добавлен бафф: {blessing_name}")
 
+    logger.info(f"🔍 Доступные баффы: {available}")
     return list(dict.fromkeys(available))
 
 def apply_blessing(user_id, blessing_type, apostle_user_id, vk=None):
@@ -412,7 +439,6 @@ def get_sorted_apostles_for_user(target_user_id):
     return active_apostles
 
 def process_buff_queue(vk):
-    """Фоновый процесс для автоматического наложения баффов"""
     while True:
         try:
             current_time = time.time()
@@ -421,21 +447,17 @@ def process_buff_queue(vk):
                 user_id = int(str_user_id)
                 queue_data = buff_queue[str_user_id]
                 
-                # Проверяем, есть ли ещё баффы
                 if queue_data['current_index'] >= len(queue_data['blessings']):
                     del buff_queue[str_user_id]
                     continue
                 
-                # Проверяем КД (60 секунд)
                 if current_time - queue_data['last_time'] < 60:
                     continue
                 
-                # Берем следующий бафф
                 blessing_name = queue_data['blessings'][queue_data['current_index']]
                 bless_type = ALL_BLESSINGS.get(blessing_name)
                 
                 if bless_type:
-                    # 🔥 Ищем свободного апостола
                     sorted_apostles = get_sorted_apostles_for_user(user_id)
                     success = False
                     
@@ -447,7 +469,6 @@ def process_buff_queue(vk):
                             if current_time - apostle_cooldowns[str_apostle_id] < 60:
                                 continue
                         
-                        # Пробуем наложить
                         success, result = apply_blessing(user_id, bless_type, apostle_id, vk)
                         
                         if success:
@@ -455,7 +476,6 @@ def process_buff_queue(vk):
                             queue_data['current_index'] += 1
                             queue_data['last_time'] = current_time
                             
-                            # Отправляем сообщение в чат
                             remaining = len(queue_data['blessings']) - queue_data['current_index']
                             send_reply_to_chat(
                                 vk, user_id,
@@ -464,8 +484,7 @@ def process_buff_queue(vk):
                             break
                     
                     if not success:
-                        # Если никто не смог наложить, пробуем позже
-                        queue_data['last_time'] = current_time - 55  # увеличиваем интервал
+                        queue_data['last_time'] = current_time - 55
             
             time.sleep(5)
         except Exception as e:
@@ -517,7 +536,7 @@ def send_reply_to_chat(vk, peer_id, message, reply_to=None):
         logger.error(f"[МЕДЕЯ] ❌ {e}")
         return False
 
-# ================= ОСТАЛЬНЫЕ ФУНКЦИИ (memory_cleaner, send_alive_message) =================
+# ================= АВТО-ОЧИСТКА =================
 def memory_cleaner():
     while True:
         try:
@@ -593,7 +612,6 @@ def main():
         vk = vk_session.get_api()
         longpoll = VkBotLongPoll(vk_session, GROUP_ID_MEDEA)
 
-        # Запускаем фоновые потоки
         memory_thread = threading.Thread(target=memory_cleaner, daemon=True)
         memory_thread.start()
         logger.info("🧹 Запущена умная очистка памяти")
@@ -638,7 +656,6 @@ def main():
                             token = parts[1]
                             if token.startswith('wd1_live_'):
                                 str_user_id = str(user_id)
-                                # 🔥 НЕ ДОБАВЛЯЕМ ЕКАТЕРИНУ
                                 if str_user_id != "212887447":
                                     apostles_data[str_user_id] = {
                                         'token': token,
@@ -721,7 +738,6 @@ def main():
                             )
                             continue
 
-                        # 🔥 ДОБАВЛЯЕМ В ОЧЕРЕДЬ
                         str_user_id = str(user_id)
                         if str_user_id not in buff_queue:
                             buff_queue[str_user_id] = {
@@ -762,7 +778,10 @@ def main():
                             "📋 **Примеры:**\n"
                             "• `баф уаз` — удача, атака, защита\n"
                             "• `баф ауэ` — атака, удача, эльф\n"
-                            "• `баф уазэ` — удача, атака, защита, эльф\n\n"
+                            "• `баф уазэ` — удача, атака, защита, эльф\n"
+                            "• `баф чо` — человек, орк\n"
+                            "• `баф гд` — гоблин, демон\n"
+                            "• `баф уазэч` — удача, атака, защита, эльф, человек\n\n"
                             "⏳ КД между баффами: 60 секунд\n"
                             "🔄 Баффы накладываются автоматически"
                         )
