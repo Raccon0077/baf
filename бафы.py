@@ -13,7 +13,7 @@ import logging
 # ================= КОНФИГУРАЦИЯ =================
 DATA_FILE = "apostles_data.json"
 LOCK_FILE = "bot.lock"
-ALIVE_INTERVAL = 3600
+ALIVE_INTERVAL = 3600  # 1 час
 
 # ================= ЛОГИРОВАНИЕ =================
 logging.basicConfig(
@@ -228,7 +228,6 @@ def get_with_retry(url, max_retries=MAX_RETRIES, delay=RETRY_DELAY):
             time.sleep(delay)
     return None
 
-# 🔥 ИСПРАВЛЕННАЯ ФУНКЦИЯ (ПРИНУДИТЕЛЬНОЕ ОБНОВЛЕНИЕ)
 def get_cached_apostle_info(user_id, force=False):
     str_user_id = str(user_id)
     if str_user_id not in apostles_cache:
@@ -247,7 +246,6 @@ def get_cached_apostle_info(user_id, force=False):
 
     token = get_apostle_token(user_id)
     if not token or not is_apostle_active(user_id):
-        logger.warning(f"⚠️ Нет токена или апостол не активен для {user_id}")
         return None
 
     try:
@@ -318,11 +316,14 @@ def get_available_blessings(user_id):
 
     races = get_apostle_races(user_id, limit=2)
     
+    logger.info(f"🔍 Расы для {user_id}: {races}")
+
     for race in races:
         blessing_name = RACE_TO_BLESSING.get(race)
         if blessing_name:
             available.append(blessing_name)
 
+    logger.info(f"🔍 Доступные баффы: {available}")
     return list(dict.fromkeys(available))
 
 def apply_blessing(user_id, blessing_type, apostle_user_id, vk=None):
@@ -361,7 +362,6 @@ def get_sorted_apostles_for_user(target_user_id):
     for str_user_id, data in apostles_data.items():
         if data.get('active', False):
             apostle_id = int(str_user_id)
-            # 🔥 ПРИНУДИТЕЛЬНО ОБНОВЛЯЕМ ДАННЫЕ ПЕРЕД СОРТИРОВКОЙ
             get_cached_apostle_info(apostle_id, force=True)
             voices = data.get('voices', 0) if data else 0
 
@@ -467,6 +467,7 @@ def parse_blessings(text, available):
                 if shortcut_name in available and shortcut_name not in found:
                     found.append(shortcut_name)
 
+    logger.info(f"🔍 Парсинг '{text}' → {found}")
     return list(dict.fromkeys(found))
 
 def send_reply_to_chat(vk, peer_id, message, reply_to=None):
@@ -541,7 +542,6 @@ def main():
 
         load_apostles()
         
-        # 🔥 ПРИНУДИТЕЛЬНОЕ ОБНОВЛЕНИЕ ВСЕХ АПОСТОЛОВ
         logger.info("🔄 Принудительное обновление данных всех апостолов...")
         for user_id in list(apostles_data.keys()):
             if apostles_data[user_id].get('active', False):
@@ -583,6 +583,7 @@ def main():
         logger.info("   • -апостол — отключить апостола")
         logger.info("   • голоса — список всех активных апостолов")
         logger.info("   • баф [буквы] — наложить благословения")
+        logger.info("   • !ботжив — проверить статус бота")
         logger.info("=" * 50)
 
         for event in longpoll.listen():
@@ -690,14 +691,45 @@ def main():
                             reply_to=message_id
                         )
 
+                    elif msg in ['!ботжив', 'бот жив', 'статус']:
+                        try:
+                            api_status = "✅ Работает"
+                            try:
+                                test_response = requests.get(f"{API_URL}TokenInfo?token={TOKEN_MEDEA}", timeout=5)
+                                if test_response.status_code != 200:
+                                    api_status = "⚠️ API не отвечает"
+                            except:
+                                api_status = "⚠️ Ошибка соединения с API"
+                            
+                            data_status = "✅ Есть"
+                            if not os.path.exists(DATA_FILE):
+                                data_status = "❌ Нет файла данных"
+                            
+                            active_count = sum(1 for a in apostles_data.values() if a.get('active', False))
+                            
+                            message = (
+                                "🤖 **Статус бота**\n\n"
+                                f"🟢 Бот: ✅ Жив\n"
+                                f"🔄 API Колодца: {api_status}\n"
+                                f"📂 Файл данных: {data_status}\n"
+                                f"👼 Активных апостолов: {active_count}\n"
+                                f"🕐 Время работы: {time.strftime('%H:%M:%S')}\n\n"
+                                "📌 Для проверки команд используй `голоса` или `баф [буквы]`"
+                            )
+                            send_reply_to_chat(vk, peer_id, message, reply_to=message_id)
+                        except Exception as e:
+                            logger.error(f"Ошибка команды статус: {e}")
+                            send_reply_to_chat(vk, peer_id, f"❌ Ошибка: {e}", reply_to=message_id)
+
                     elif msg in ['бот', 'помощь', 'help', '/help']:
                         help_text = (
                             "⚔️ **Команды Воплощения Света**\n\n"
                             "📩 `+апостол [токен]` — активировать апостола\n"
                             "   🔑 Токен должен начинаться с `wd1_live_`\n"
                             "⛔ `-апостол` — отключить апостола\n"
-                            "🔊 `голоса` — список всех активных апостолов\n\n"
-                            "🔥 **Баффы:**\n"
+                            "🔊 `голоса` — список всех активных апостолов\n"
+                            "🤖 `!ботжив` или `статус` — проверить статус бота\n\n"
+                            "🔥 **Баффы (сокращения):**\n"
                             "• `баф а` — атака\n"
                             "• `баф з` — защита\n"
                             "• `баф у` — удача\n"
@@ -708,7 +740,12 @@ def main():
                             "• `баф в` — гном\n"
                             "• `баф д` — демон\n"
                             "• `баф н` — нежить\n\n"
-                            "📋 **Пример:** `баф уаз` — удача, атака, защита"
+                            "📋 **Примеры комбинаций:**\n"
+                            "• `баф уаз` — удача, атака, защита\n"
+                            "• `баф эу` — эльф, удача\n"
+                            "• `баф уазэ` — удача, атака, защита, эльф\n"
+                            "• `баф чэ` — человек, эльф\n\n"
+                            "⏳ КД между баффами: 60 секунд"
                         )
                         send_reply_to_chat(vk, peer_id, help_text, reply_to=message_id)
 
