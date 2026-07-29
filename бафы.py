@@ -79,7 +79,6 @@ def load_apostles():
         try:
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 apostles_data = json.load(f)
-                # Удаляем Екатерину из апостолов
                 if "212887447" in apostles_data:
                     del apostles_data["212887447"]
                     save_apostles()
@@ -106,7 +105,6 @@ def save_apostles():
             except:
                 existing_data = {}
         
-        # Удаляем Екатерину
         if "212887447" in existing_data:
             del existing_data["212887447"]
         
@@ -321,40 +319,35 @@ def get_all_apostles_display():
 def get_available_blessings(user_id):
     available = list(BASE_BLESSINGS.keys())
 
-    if not is_apostle_active(user_id):
-        return available
-
-    # 🔥 БЕРЁМ ДАННЫЕ ИЗ ФАЙЛА
-    apostle = get_apostle_info(user_id)
-    if not apostle:
-        return available
-    
-    race_text = apostle.get('race', '')
-    logger.info(f"🔍 Раса из файла для {user_id}: {race_text}")
-
-    if not race_text:
-        return available
-
-    # 🔥 РАЗБИРАЕМ РАСУ
-    races = []
-    if '-' in race_text:
-        parts = race_text.split('-')
-        for part in parts[:3]:
-            part = part.strip().lower()
-            if part in RACE_BLESSINGS:
-                races.append(part)
-    else:
-        race_text = race_text.strip().lower()
-        if race_text in RACE_BLESSINGS:
-            races.append(race_text)
-
-    logger.info(f"🔍 Расы для {user_id}: {races}")
-
-    for race in races:
-        blessing_name = RACE_TO_BLESSING.get(race)
-        if blessing_name:
-            available.append(blessing_name)
-            logger.info(f"   ✅ Добавлен бафф: {blessing_name}")
+    # 🔥 ЧИТАЕМ ФАЙЛ НАПРЯМУЮ
+    try:
+        with open(DATA_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            str_user_id = str(user_id)
+            
+            if str_user_id in data:
+                race_text = data[str_user_id].get('race', '')
+                logger.info(f"🔍 Раса из файла для {user_id}: {race_text}")
+                
+                if race_text:
+                    if '-' in race_text:
+                        parts = race_text.split('-')
+                        for part in parts[:3]:
+                            part = part.strip().lower()
+                            if part in RACE_BLESSINGS:
+                                blessing_name = RACE_TO_BLESSING.get(part)
+                                if blessing_name:
+                                    available.append(blessing_name)
+                                    logger.info(f"   ✅ Добавлен бафф: {blessing_name}")
+                    else:
+                        race_text = race_text.strip().lower()
+                        if race_text in RACE_BLESSINGS:
+                            blessing_name = RACE_TO_BLESSING.get(race_text)
+                            if blessing_name:
+                                available.append(blessing_name)
+                                logger.info(f"   ✅ Добавлен бафф: {blessing_name}")
+    except Exception as e:
+        logger.error(f"Ошибка чтения файла: {e}")
 
     logger.info(f"🔍 Доступные баффы: {available}")
     return list(dict.fromkeys(available))
@@ -778,10 +771,7 @@ def main():
                             "📋 **Примеры:**\n"
                             "• `баф уаз` — удача, атака, защита\n"
                             "• `баф ауэ` — атака, удача, эльф\n"
-                            "• `баф уазэ` — удача, атака, защита, эльф\n"
-                            "• `баф чо` — человек, орк\n"
-                            "• `баф гд` — гоблин, демон\n"
-                            "• `баф уазэч` — удача, атака, защита, эльф, человек\n\n"
+                            "• `баф уазэ` — удача, атака, защита, эльф\n\n"
                             "⏳ КД между баффами: 60 секунд\n"
                             "🔄 Баффы накладываются автоматически"
                         )
