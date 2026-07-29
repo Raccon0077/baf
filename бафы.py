@@ -13,7 +13,7 @@ import logging
 # ================= КОНФИГУРАЦИЯ =================
 DATA_FILE = "apostles_data.json"
 LOCK_FILE = "bot.lock"
-ALIVE_INTERVAL = 3600  # 1 час
+ALIVE_INTERVAL = 3600
 
 # ================= ЛОГИРОВАНИЕ =================
 logging.basicConfig(
@@ -315,17 +315,15 @@ def get_available_blessings(user_id):
         return available
 
     races = get_apostle_races(user_id, limit=2)
-    
-    logger.info(f"🔍 Расы для {user_id}: {races}")
 
     for race in races:
         blessing_name = RACE_TO_BLESSING.get(race)
         if blessing_name:
             available.append(blessing_name)
 
-    logger.info(f"🔍 Доступные баффы: {available}")
     return list(dict.fromkeys(available))
 
+# ================= ФУНКЦИЯ НАЛОЖЕНИЯ С ОТЧЁТОМ В ЛИЧКУ =================
 def apply_blessing(user_id, blessing_type, apostle_user_id, vk=None):
     token = get_apostle_token(apostle_user_id)
     if not token or not is_apostle_active(apostle_user_id):
@@ -343,16 +341,44 @@ def apply_blessing(user_id, blessing_type, apostle_user_id, vk=None):
         )
         data = response.json()
 
+        # 🔥 Получаем имена для отчёта
+        apostle_info = get_apostle_info(apostle_user_id)
+        apostle_name = apostle_info.get('name', f"Апостол_{apostle_user_id}") if apostle_info else f"Апостол_{apostle_user_id}"
+        
+        target_info = get_apostle_info(user_id)
+        target_name = target_info.get('name', f"Пользователь_{user_id}") if target_info else f"Пользователь_{user_id}"
+
         if data.get('result') == 1:
+            # 🔥 ОТПРАВЛЯЕМ В ЛИЧКУ МЕДЕИ
+            if vk:
+                try:
+                    vk.messages.send(
+                        user_id=MEAD_ID,
+                        message=f"✅ **{apostle_name}** наложил **{blessing_type}** на **{target_name}** (ID: {user_id})",
+                        random_id=random.randint(1, 1000000)
+                    )
+                except Exception as e:
+                    logger.error(f"Ошибка отправки в личку: {e}")
             return True, f"✅ {blessing_type} (от {apostle_user_id})"
         else:
             error = data.get('error', {})
             error_message = error.get('message', 'Ошибка')
             if "уже действует" in error_message or "already active" in error_message:
                 return False, None
+            
+            # 🔥 ОТПРАВЛЯЕМ ОШИБКУ В ЛИЧКУ МЕДЕИ
+            if vk:
+                try:
+                    vk.messages.send(
+                        user_id=MEAD_ID,
+                        message=f"❌ **{apostle_name}** НЕ смог наложить **{blessing_type}** на **{target_name}** (ID: {user_id})\nОшибка: {error_message}",
+                        random_id=random.randint(1, 1000000)
+                    )
+                except Exception as e:
+                    logger.error(f"Ошибка отправки в личку: {e}")
+            
             return False, f"❌ {error_message}"
     except Exception as e:
-        logger.error(f"Ошибка наложения: {e}")
         return False, f"❌ Ошибка: {e}"
 
 def get_sorted_apostles_for_user(target_user_id):
@@ -467,7 +493,6 @@ def parse_blessings(text, available):
                 if shortcut_name in available and shortcut_name not in found:
                     found.append(shortcut_name)
 
-    logger.info(f"🔍 Парсинг '{text}' → {found}")
     return list(dict.fromkeys(found))
 
 def send_reply_to_chat(vk, peer_id, message, reply_to=None):
@@ -729,7 +754,7 @@ def main():
                             "⛔ `-апостол` — отключить апостола\n"
                             "🔊 `голоса` — список всех активных апостолов\n"
                             "🤖 `!ботжив` или `статус` — проверить статус бота\n\n"
-                            "🔥 **Баффы (сокращения):**\n"
+                            "🔥 **Баффы:**\n"
                             "• `баф а` — атака\n"
                             "• `баф з` — защита\n"
                             "• `баф у` — удача\n"
@@ -740,12 +765,11 @@ def main():
                             "• `баф в` — гном\n"
                             "• `баф д` — демон\n"
                             "• `баф н` — нежить\n\n"
-                            "📋 **Примеры комбинаций:**\n"
+                            "📋 **Примеры:**\n"
                             "• `баф уаз` — удача, атака, защита\n"
                             "• `баф эу` — эльф, удача\n"
-                            "• `баф уазэ` — удача, атака, защита, эльф\n"
-                            "• `баф чэ` — человек, эльф\n\n"
-                            "⏳ КД между баффами: 60 секунд"
+                            "• `баф уазэ` — удача, атака, защита, эльф\n\n"
+                            "📩 Отчёты о баффах приходят в личку"
                         )
                         send_reply_to_chat(vk, peer_id, help_text, reply_to=message_id)
 
