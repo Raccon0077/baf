@@ -154,7 +154,6 @@ RACE_TO_BLESSING = {
     "нежить": "нежити"
 }
 
-# 🔥 ВСЕ СОКРАЩЕНИЯ (ВКЛЮЧАЯ РАСОВЫЕ)
 SHORTCUTS = {
     "а": "атаки",
     "з": "защиты",
@@ -229,6 +228,7 @@ def get_with_retry(url, max_retries=MAX_RETRIES, delay=RETRY_DELAY):
             time.sleep(delay)
     return None
 
+# 🔥 ИСПРАВЛЕННАЯ ФУНКЦИЯ (ПРИНУДИТЕЛЬНОЕ ОБНОВЛЕНИЕ)
 def get_cached_apostle_info(user_id, force=False):
     str_user_id = str(user_id)
     if str_user_id not in apostles_cache:
@@ -247,6 +247,7 @@ def get_cached_apostle_info(user_id, force=False):
 
     token = get_apostle_token(user_id)
     if not token or not is_apostle_active(user_id):
+        logger.warning(f"⚠️ Нет токена или апостол не активен для {user_id}")
         return None
 
     try:
@@ -353,7 +354,6 @@ def apply_blessing(user_id, blessing_type, apostle_user_id, vk=None):
         logger.error(f"Ошибка наложения: {e}")
         return False, f"❌ Ошибка: {e}"
 
-# 🔥 ИСПРАВЛЕННАЯ ФУНКЦИЯ (ВИДИТ ВСЕХ АКТИВНЫХ АПОСТОЛОВ)
 def get_sorted_apostles_for_user(target_user_id):
     active_apostles = []
     current_time = time.time()
@@ -361,7 +361,8 @@ def get_sorted_apostles_for_user(target_user_id):
     for str_user_id, data in apostles_data.items():
         if data.get('active', False):
             apostle_id = int(str_user_id)
-            info = get_cached_apostle_info(apostle_id)
+            # 🔥 ПРИНУДИТЕЛЬНО ОБНОВЛЯЕМ ДАННЫЕ ПЕРЕД СОРТИРОВКОЙ
+            get_cached_apostle_info(apostle_id, force=True)
             voices = data.get('voices', 0) if data else 0
 
             is_on_cooldown = False
@@ -436,7 +437,6 @@ def apply_buffs_round_robin(target_user_id, blessings, vk):
 
     return results
 
-# 🔥 ИСПРАВЛЕННЫЙ ПАРСИНГ (ПОДДЕРЖКА ВСЕХ КОМБО)
 def parse_blessings(text, available):
     text = text.lower().strip()
     for prefix in ['баф ', 'баф']:
@@ -449,20 +449,17 @@ def parse_blessings(text, available):
     found = []
     remaining = text
 
-    # Сначала ищем полные названия
     for name in available:
         if name in remaining:
             found.append(name)
             remaining = remaining.replace(name, '').strip()
 
-    # Потом ищем по сокращениям
     for shortcut, name in sorted(SHORTCUTS.items(), key=lambda x: -len(x[0])):
         if shortcut in remaining:
             if name in available and name not in found:
                 found.append(name)
                 remaining = remaining.replace(shortcut, '').strip()
 
-    # Если ничего не нашли — пробуем по одной букве
     if not found:
         for char in text:
             if char in SHORTCUTS:
@@ -531,7 +528,7 @@ def send_alive_message(vk):
         logger.info(f"📩 Отправлено сообщение Екатерине (следующее через 1 час)")
         return ALIVE_INTERVAL
     except Exception as e:
-        logger.error(f"Ошибка отправки сообщения Екатерине: {e}")
+        logger.error(f"Ошибка отправки: {e}")
         return ALIVE_INTERVAL
 
 # ================= ОСНОВНОЙ БОТ =================
@@ -544,11 +541,13 @@ def main():
 
         load_apostles()
         
-        logger.info("🔄 Обновление данных всех апостолов...")
+        # 🔥 ПРИНУДИТЕЛЬНОЕ ОБНОВЛЕНИЕ ВСЕХ АПОСТОЛОВ
+        logger.info("🔄 Принудительное обновление данных всех апостолов...")
         for user_id in list(apostles_data.keys()):
             if apostles_data[user_id].get('active', False):
                 try:
                     get_cached_apostle_info(int(user_id), force=True)
+                    logger.info(f"   ✅ Обновлён апостол {user_id}")
                 except Exception as e:
                     logger.error(f"   ❌ Ошибка обновления {user_id}: {e}")
 
@@ -698,7 +697,7 @@ def main():
                             "   🔑 Токен должен начинаться с `wd1_live_`\n"
                             "⛔ `-апостол` — отключить апостола\n"
                             "🔊 `голоса` — список всех активных апостолов\n\n"
-                            "🔥 **Баффы (сокращения):**\n"
+                            "🔥 **Баффы:**\n"
                             "• `баф а` — атака\n"
                             "• `баф з` — защита\n"
                             "• `баф у` — удача\n"
