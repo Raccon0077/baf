@@ -13,6 +13,7 @@ import logging
 # ================= КОНФИГУРАЦИЯ (СТАРЫЙ ПУТЬ) =================
 DATA_FILE = "apostles_data.json"
 LOCK_FILE = "bot.lock"
+ALIVE_INTERVAL = 3600  # 1 час в секундах
 
 # ================= ЛОГИРОВАНИЕ =================
 logging.basicConfig(
@@ -524,13 +525,13 @@ def memory_cleaner():
             time.sleep(60)
 
 
-# ================= АВТО-СООБЩЕНИЕ =================
+# ================= АВТО-СООБЩЕНИЕ (КАЖДЫЙ ЧАС) =================
 def send_alive_message(vk):
+    """Отправляет сообщение Екатерине Наумовой о том, что бот жив (раз в час)"""
     try:
-        minutes = random.randint(10, 30)
         message = (
             "🦝 **Бот жив!**\n\n"
-            f"✅ Следующее сообщение через {minutes} минут\n"
+            "✅ Следующее сообщение через 1 час\n"
             "🔥 Бафы можно брать!\n\n"
             "📋 Команды:\n"
             "• `баф [буквы]` — наложить благословения\n"
@@ -544,11 +545,11 @@ def send_alive_message(vk):
             message=message,
             random_id=random.randint(1, 1000000)
         )
-        logger.info(f"📩 Отправлено сообщение Екатерине (следующее через {minutes} мин)")
-        return minutes * 60
+        logger.info(f"📩 Отправлено сообщение Екатерине (следующее через 1 час)")
+        return ALIVE_INTERVAL
     except Exception as e:
-        logger.error(f"Ошибка отправки: {e}")
-        return 600
+        logger.error(f"Ошибка отправки сообщения Екатерине: {e}")
+        return ALIVE_INTERVAL
 
 
 # ================= ОСНОВНОЙ БОТ =================
@@ -593,7 +594,7 @@ def main():
 
         alive_thread = threading.Thread(target=alive_message_loop, daemon=True)
         alive_thread.start()
-        logger.info("✅ Запущен поток авт-сообщений Екатерине (каждые 10-30 минут)")
+        logger.info("✅ Запущен поток авт-сообщений Екатерине (каждый час)")
 
         logger.info("✅ Бот запущен!")
         logger.info("📌 Команды:")
@@ -601,6 +602,7 @@ def main():
         logger.info("   • -апостол — отключить апостола")
         logger.info("   • голоса — список всех активных апостолов")
         logger.info("   • баф [буквы] — наложить благословения")
+        logger.info("   • !ботжив — проверить статус бота")
         logger.info("=" * 50)
 
         for event in longpoll.listen():
@@ -677,6 +679,7 @@ def main():
                         else:
                             send_reply_to_chat(vk, peer_id, "❌ У тебя нет активного апостола!", reply_to=message_id)
 
+                    # ===== КОМАНДА "ГОЛОСА" =====
                     elif msg in ['голоса', 'голос']:
                         apostles_list = get_all_apostles_display()
                         if apostles_list:
@@ -685,15 +688,11 @@ def main():
                             response = "❌ Нет активных апостолов!"
                         send_reply_to_chat(vk, peer_id, response, reply_to=message_id)
 
+                    # ===== КОМАНДА "БАФ" =====
                     elif msg.startswith('баф'):
-                        available_apostles = get_sorted_apostles_for_user(user_id)
-                        if not available_apostles:
-                            send_reply_to_chat(vk, peer_id, "❌ Нет активных апостолов! Используй `+апостол [токен]`",
-                                               reply_to=message_id)
-                            continue
-
                         available = get_available_blessings(user_id)
                         blessings = parse_blessings(msg, available)
+                        
                         if not blessings:
                             send_reply_to_chat(
                                 vk, peer_id,
@@ -702,7 +701,7 @@ def main():
                             )
                             continue
 
-                        apply_buffs_round_robin(user_id, blessings, vk)
+                        results = apply_buffs_round_robin(user_id, blessings, vk)
 
                         queue_count = len(blessings)
                         send_reply_to_chat(
@@ -713,13 +712,46 @@ def main():
                             reply_to=message_id
                         )
 
+                    # ===== КОМАНДА "!БОТЖИВ" =====
+                    elif msg in ['!ботжив', 'бот жив', 'статус']:
+                        try:
+                            api_status = "✅ Работает"
+                            try:
+                                test_response = requests.get(f"{API_URL}TokenInfo?token={TOKEN_MEDEA}", timeout=5)
+                                if test_response.status_code != 200:
+                                    api_status = "⚠️ API не отвечает"
+                            except:
+                                api_status = "⚠️ Ошибка соединения с API"
+                            
+                            data_status = "✅ Есть"
+                            if not os.path.exists(DATA_FILE):
+                                data_status = "❌ Нет файла данных"
+                            
+                            active_count = sum(1 for a in apostles_data.values() if a.get('active', False))
+                            
+                            message = (
+                                "🤖 **Статус бота**\n\n"
+                                f"🟢 Бот: ✅ Жив\n"
+                                f"🔄 API Колодца: {api_status}\n"
+                                f"📂 Файл данных: {data_status}\n"
+                                f"👼 Активных апостолов: {active_count}\n"
+                                f"🕐 Время работы: {time.strftime('%H:%M:%S')}\n\n"
+                                "📌 Для проверки команд используй `голоса` или `баф [буквы]`"
+                            )
+                            send_reply_to_chat(vk, peer_id, message, reply_to=message_id)
+                        except Exception as e:
+                            logger.error(f"Ошибка команды статус: {e}")
+                            send_reply_to_chat(vk, peer_id, f"❌ Ошибка: {e}", reply_to=message_id)
+
+                    # ===== ПОМОЩЬ =====
                     elif msg in ['бот', 'помощь', 'help', '/help']:
                         help_text = (
                             "⚔️ **Команды Воплощения Света**\n\n"
                             "📩 `+апостол [токен]` — активировать апостола\n"
                             "   🔑 Токен должен начинаться с `wd1_live_`\n"
                             "⛔ `-апостол` — отключить апостола\n"
-                            "🔊 `голоса` — список всех активных апостолов\n\n"
+                            "🔊 `голоса` — список всех активных апостолов\n"
+                            "🤖 `!ботжив` или `статус` — проверить статус бота\n\n"
                             "🔥 **Баффы:**\n"
                             "• `баф а` — атака\n"
                             "• `баф з` — защита\n"
