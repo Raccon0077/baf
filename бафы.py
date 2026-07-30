@@ -9,12 +9,13 @@ import os
 import sys
 import gc
 import logging
+import atexit
 
 # ================= КОНФИГУРАЦИЯ =================
 DATA_FILE = "apostles_data.json"
 LOCK_FILE = "bot.lock"
 ALIVE_INTERVAL = 3600
-MEAD_ID = 212887447  # Екатерина Наумова
+MEAD_ID = 212887447  # Екатерина Наумова (получает отчёты)
 
 # ================= ЛОГИРОВАНИЕ =================
 logging.basicConfig(
@@ -79,10 +80,6 @@ def load_apostles():
         try:
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 apostles_data = json.load(f)
-                if "212887447" in apostles_data:
-                    del apostles_data["212887447"]
-                    save_apostles()
-                    logger.info("🗑️ Екатерина Наумова удалена из списка апостолов")
                 logger.info(f"📂 Загружено {len(apostles_data)} апостолов")
                 return True
         except Exception as e:
@@ -97,22 +94,25 @@ def load_apostles():
 
 def save_apostles():
     try:
+        logger.info(f"💾 Сохранение {len(apostles_data)} апостолов...")
+        
         existing_data = {}
         if os.path.exists(DATA_FILE):
             try:
                 with open(DATA_FILE, 'r', encoding='utf-8') as f:
                     existing_data = json.load(f)
-            except:
+                    logger.info(f"   📂 В файле уже {len(existing_data)} апостолов")
+            except Exception as e:
+                logger.error(f"   ❌ Ошибка чтения файла: {e}")
                 existing_data = {}
-        
-        if "212887447" in existing_data:
-            del existing_data["212887447"]
         
         for user_id, data in apostles_data.items():
             if user_id in existing_data:
                 existing_data[user_id].update(data)
+                logger.info(f"   📝 Обновлён {user_id}")
             else:
                 existing_data[user_id] = data
+                logger.info(f"   ➕ Добавлен {user_id}")
         
         with open(DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(existing_data, f, ensure_ascii=False, indent=2)
@@ -120,7 +120,9 @@ def save_apostles():
         logger.info(f"💾 Сохранено {len(existing_data)} апостолов")
         return True
     except Exception as e:
-        logger.error(f"Ошибка сохранения данных: {e}")
+        logger.error(f"❌ Ошибка сохранения данных: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def clean_inactive_apostles():
@@ -336,7 +338,7 @@ def send_to_mead(message):
             message=message,
             random_id=random.randint(1, 1000000)
         )
-        logger.info(f"📩 Отправлено Екатерине: {message[:50]}...")
+        logger.info(f"📩 Отправлено Екатерине")
         return True
     except Exception as e:
         logger.error(f"Ошибка отправки Екатерине: {e}")
@@ -367,7 +369,6 @@ def apply_blessing(user_id, blessing_type, apostle_user_id):
         target_name = target_info.get('name', f"Пользователь_{user_id}") if target_info else f"Пользователь_{user_id}"
 
         if data.get('result') == 1:
-            # 🔥 Отправляем только Екатерине
             send_to_mead(f"✅ **{apostle_name}** наложил **{blessing_type}** на **{target_name}** (ID: {user_id})")
             return True, f"✅ {blessing_type} (от {apostle_user_id})"
         else:
@@ -375,7 +376,6 @@ def apply_blessing(user_id, blessing_type, apostle_user_id):
             error_message = error.get('message', 'Ошибка')
             if "уже действует" in error_message or "already active" in error_message:
                 return False, "уже действует"
-            # 🔥 Отправляем ошибку только Екатерине
             send_to_mead(f"❌ **{apostle_name}** НЕ смог наложить **{blessing_type}** на **{target_name}** (ID: {user_id})\nОшибка: {error_message}")
             return False, f"❌ {error_message}"
     except Exception as e:
@@ -403,7 +403,6 @@ def get_sorted_apostles_for_user(target_user_id):
                 'cooldown_end': apostle_cooldowns.get(str_user_id, 0)
             })
 
-    # Сортировка: сначала свободные, потом по голосам
     active_apostles.sort(key=lambda x: (x['is_on_cooldown'], -x['voices']))
     return active_apostles
 
@@ -417,12 +416,10 @@ def process_buff_queue():
                 user_id = int(str_user_id)
                 queue_data = buff_queue[str_user_id]
                 
-                # Если все баффы наложены — удаляем очередь
                 if queue_data['current_index'] >= len(queue_data['blessings']):
                     del buff_queue[str_user_id]
                     continue
                 
-                # Проверяем КД (60 секунд между баффами для этого пользователя)
                 if current_time - queue_data['last_time'] < 60:
                     continue
                 
@@ -433,7 +430,6 @@ def process_buff_queue():
                     queue_data['current_index'] += 1
                     continue
                 
-                # 🔥 ПРОВЕРЯЕМ, НЕ РАСОВЫЙ ЛИ ЭТО БАФФ
                 target_info = get_apostle_info(user_id)
                 if target_info:
                     target_race = target_info.get('race', '')
@@ -451,7 +447,6 @@ def process_buff_queue():
                         send_to_mead(f"⏭️ {blessing_name} пропущен (у цели уже есть раса {race_name})")
                         continue
                 
-                # 🔥 ПОЛУЧАЕМ АПОСТОЛОВ ПО ПОРЯДКУ
                 sorted_apostles = get_sorted_apostles_for_user(user_id)
                 success = False
                 
@@ -461,21 +456,17 @@ def process_buff_queue():
                     queue_data['last_time'] = current_time
                     continue
                 
-                # 🔥 ПРОБУЕМ НАЛОЖИТЬ КАЖДЫМ АПОСТОЛОМ ПО ПОРЯДКУ
                 for apostle in sorted_apostles:
                     apostle_id = apostle['user_id']
                     str_apostle_id = str(apostle_id)
                     
-                    # Проверяем КД апостола
                     if str_apostle_id in apostle_cooldowns:
                         if current_time - apostle_cooldowns[str_apostle_id] < 60:
                             continue
                     
-                    # Пробуем наложить
                     success, result = apply_blessing(user_id, bless_type, apostle_id)
                     
                     if success:
-                        # ✅ Успешно наложили
                         apostle_cooldowns[str_apostle_id] = time.time()
                         queue_data['current_index'] += 1
                         queue_data['last_time'] = current_time
@@ -484,17 +475,14 @@ def process_buff_queue():
                         send_to_mead(f"✅ {blessing_name} наложен! Осталось в очереди: {remaining}")
                         break
                     elif result and "уже действует" in str(result):
-                        # ⏭️ Бафф уже действует — пропускаем
                         queue_data['current_index'] += 1
                         queue_data['last_time'] = current_time
                         send_to_mead(f"⏭️ {blessing_name} пропущен (уже действует)")
                         success = True
                         break
                     else:
-                        # ❌ Не удалось наложить — пробуем следующего апостола
                         continue
                 
-                # Если ни один апостол не смог наложить
                 if not success:
                     queue_data['current_index'] += 1
                     queue_data['last_time'] = current_time
@@ -574,7 +562,6 @@ def memory_cleaner():
             logger.error(f"Ошибка очистки: {e}")
             time.sleep(60)
 
-# ================= АВТО-СООБЩЕНИЕ =================
 def send_alive_message():
     try:
         message = (
@@ -630,7 +617,6 @@ def main():
         vk = vk_session.get_api()
         longpoll = VkBotLongPoll(vk_session, GROUP_ID_MEDEA)
 
-        # Запускаем фоновые потоки
         memory_thread = threading.Thread(target=memory_cleaner, daemon=True)
         memory_thread.start()
         logger.info("🧹 Запущена умная очистка памяти")
@@ -650,6 +636,7 @@ def main():
         logger.info("   • голоса — список всех активных апостолов")
         logger.info("   • баф [буквы] — наложить благословения")
         logger.info("📩 Отчёты о баффах приходят только Екатерине Наумовой")
+        logger.info("💾 Данные сохраняются в файл apostles_data.json")
         logger.info("=" * 50)
 
         for event in longpoll.listen():
@@ -667,34 +654,31 @@ def main():
                             token = parts[1]
                             if token.startswith('wd1_live_'):
                                 str_user_id = str(user_id)
-                                if str_user_id != "212887447":
-                                    apostles_data[str_user_id] = {
-                                        'token': token,
-                                        'active': True,
-                                        'name': 'Апостол',
-                                        'voices': 0,
-                                        'level': 0,
-                                        'race': ''
-                                    }
-                                    save_apostles()
-                                    if str_user_id in apostles_cache:
-                                        del apostles_cache[str_user_id]
+                                apostles_data[str_user_id] = {
+                                    'token': token,
+                                    'active': True,
+                                    'name': 'Апостол',
+                                    'voices': 0,
+                                    'level': 0,
+                                    'race': ''
+                                }
+                                save_apostles()
+                                if str_user_id in apostles_cache:
+                                    del apostles_cache[str_user_id]
 
-                                    try:
-                                        check_response = get_with_retry(f"{API_URL}TokenInfo?token={token}")
-                                        if check_response and check_response.get('result') == 1:
-                                            get_cached_apostle_info(user_id, force=True)
-                                            send_to_mead(f"🦝 **Апостол успешно активирован для @id{user_id}!")
-                                        else:
-                                            apostles_data[str_user_id]['active'] = False
-                                            save_apostles()
-                                            send_reply_to_chat(vk, peer_id, "❌ Неверный токен!", reply_to=message_id)
-                                    except Exception as e:
+                                try:
+                                    check_response = get_with_retry(f"{API_URL}TokenInfo?token={token}")
+                                    if check_response and check_response.get('result') == 1:
+                                        get_cached_apostle_info(user_id, force=True)
+                                        send_to_mead(f"🦝 **Апостол успешно активирован для @id{user_id}!")
+                                    else:
                                         apostles_data[str_user_id]['active'] = False
                                         save_apostles()
-                                        send_reply_to_chat(vk, peer_id, f"❌ Ошибка: {e}", reply_to=message_id)
-                                else:
-                                    send_reply_to_chat(vk, peer_id, "❌ Екатерина не может быть апостолом!", reply_to=message_id)
+                                        send_reply_to_chat(vk, peer_id, "❌ Неверный токен!", reply_to=message_id)
+                                except Exception as e:
+                                    apostles_data[str_user_id]['active'] = False
+                                    save_apostles()
+                                    send_reply_to_chat(vk, peer_id, f"❌ Ошибка: {e}", reply_to=message_id)
                             else:
                                 send_reply_to_chat(vk, peer_id,
                                                    "❌ Неверный формат токена! Токен должен начинаться с `wd1_live_`",
@@ -787,7 +771,11 @@ def main():
     except Exception as e:
         logger.error(f"❌ Ошибка: {e}")
     finally:
+        save_apostles()
         remove_lock()
+
+# Регистрируем автосохранение при завершении
+atexit.register(save_apostles)
 
 if __name__ == "__main__":
     main()
