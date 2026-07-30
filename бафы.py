@@ -16,6 +16,14 @@ DATA_FILE = "apostles_data.json"
 LOCK_FILE = "bot.lock"
 MEAD_ID = 212887447  # Екатерина Наумова (получает отчёты)
 
+# 🔥 ID РАЗРЕШЁННЫХ ЧАТОВ (ИЗ ТВОИХ ССЫЛОК)
+# peer_id 2000000171 → chat_id = 171
+# peer_id 2000000173 → chat_id = 173
+ALLOWED_CHATS = [
+    171,  # https://vk.ru/im/convo/2000000171
+    173   # https://vk.ru/im/convo/2000000173
+]
+
 # ================= ЛОГИРОВАНИЕ =================
 logging.basicConfig(
     level=logging.INFO,
@@ -79,11 +87,6 @@ def load_apostles():
         try:
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 apostles_data = json.load(f)
-                # Удаляем Екатерину из апостолов
-                if "212887447" in apostles_data:
-                    del apostles_data["212887447"]
-                    save_apostles()
-                    logger.info("🗑️ Екатерина Наумова удалена из списка апостолов")
                 logger.info(f"📂 Загружено {len(apostles_data)} апостолов")
                 return True
         except Exception as e:
@@ -109,10 +112,6 @@ def save_apostles():
             except Exception as e:
                 logger.error(f"   ❌ Ошибка чтения файла: {e}")
                 existing_data = {}
-        
-        # Удаляем Екатерину при сохранении
-        if "212887447" in existing_data:
-            del existing_data["212887447"]
         
         for user_id, data in apostles_data.items():
             if user_id in existing_data:
@@ -349,7 +348,7 @@ def get_available_blessings(user_id):
 
     return list(dict.fromkeys(available))
 
-# ================= ОТПРАВКА В ЛИЧКУ (ТОЛЬКО ЕКАТЕРИНЕ) =================
+# ================= ОТПРАВКА В ЛИЧКУ =================
 def send_to_mead(message):
     try:
         vk_session = vk_api.VkApi(token=TOKEN_MEDEA)
@@ -591,7 +590,7 @@ def memory_cleaner():
             logger.error(f"Ошибка очистки: {e}")
             time.sleep(60)
 
-# ================= АВТО-СООБЩЕНИЕ (2-4 ЧАСА) =================
+# ================= АВТО-СООБЩЕНИЕ =================
 def send_alive_message():
     try:
         hours = random.randint(2, 4)
@@ -608,10 +607,10 @@ def send_alive_message():
             "• `-апостол` — отключить апостола"
         )
         send_to_mead(message)
-        return minutes * 60  # в секундах
+        return minutes * 60
     except Exception as e:
         logger.error(f"Ошибка отправки alive-сообщения: {e}")
-        return 7200  # 2 часа по умолчанию
+        return 7200
 
 def alive_message_loop():
     while True:
@@ -663,6 +662,7 @@ def main():
         logger.info("✅ Запущен поток авт-сообщений Екатерине (каждые 2-4 часа)")
 
         logger.info("✅ Бот запущен!")
+        logger.info(f"📌 Разрешённые чаты: {ALLOWED_CHATS}")
         logger.info("📌 Команды:")
         logger.info("   • +апостол [токен] — активировать апостола")
         logger.info("   • -апостол — отключить апостола")
@@ -679,6 +679,14 @@ def main():
                     message_text = event.message.text
                     message_id = event.message.id
                     peer_id = event.message.peer_id
+                    
+                    # 🔥 ПРОВЕРКА: РАЗРЕШЁН ЛИ ЧАТ
+                    if peer_id > 2000000000:
+                        chat_id = peer_id - 2000000000
+                        if chat_id not in ALLOWED_CHATS:
+                            # Игнорируем сообщения из других чатов
+                            continue
+                    
                     msg = message_text.lower().strip()
 
                     if msg.startswith('+апостол'):
