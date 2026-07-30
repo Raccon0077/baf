@@ -763,7 +763,7 @@ def main():
                         else:
                             buff_queue[str_user_id]['blessings'].extend(blessings)
 
-                                                queue_count = len(buff_queue[str_user_id]['blessings']) - buff_queue[str_user_id]['current_index']
+                        queue_count = len(buff_queue[str_user_id]['blessings']) - buff_queue[str_user_id]['current_index']
                         send_reply_to_chat(
                             vk, peer_id,
                             f"📋 **Благословения добавлены в очередь!**\n"
