@@ -171,17 +171,6 @@ def get_apostle_race(user_id):
     apostle = get_apostle_info(user_id)
     return apostle.get('race', '') if apostle else ''
 
-def get_apostle_races(user_id, limit=2):
-    race_text = get_apostle_race(user_id)
-    if not race_text:
-        return []
-    if '-' in race_text:
-        parts = race_text.split('-')
-        return [part.strip().lower() for part in parts[:limit] if part.strip().lower() in RACE_BLESSINGS]
-    else:
-        race_text = race_text.strip().lower()
-        return [race_text] if race_text in RACE_BLESSINGS else []
-
 def get_with_retry(url, max_retries=3, delay=5):
     for attempt in range(max_retries):
         try:
@@ -233,11 +222,10 @@ def get_cached_apostle_info(user_id, force=False):
     except Exception as e:
         return cache['data']
 
-# ================= 🔥 ИСПРАВЛЕННАЯ ФУНКЦИЯ (ВСЕ РАСЫ ВСЕГДА ДОСТУПНЫ) =================
-def get_available_blessings(user_id):
+# ================= ДВЕ ФУНКЦИИ ДОСТУПНОСТИ =================
+def get_available_blessings_for_target(user_id):
+    """Для цели — все расы доступны"""
     available = list(BASE_BLESSINGS.keys())
-    
-    # 🔥 ВСЕ РАСОВЫЕ БАФФЫ ВСЕГДА ДОСТУПНЫ
     available.append("человека")
     available.append("эльфа")
     available.append("орка")
@@ -245,7 +233,31 @@ def get_available_blessings(user_id):
     available.append("гнома")
     available.append("демона")
     available.append("нежити")
+    return list(dict.fromkeys(available))
 
+def get_available_blessings_for_apostle(apostle_id):
+    """Для апостола — ТОЛЬКО его расы"""
+    available = list(BASE_BLESSINGS.keys())
+    
+    apostle = get_apostle_info(apostle_id)
+    if apostle:
+        race_text = apostle.get('race', '')
+        if race_text:
+            if '-' in race_text:
+                parts = race_text.split('-')
+                for part in parts[:2]:
+                    part = part.strip().lower()
+                    if part in RACE_BLESSINGS:
+                        blessing_name = RACE_TO_BLESSING.get(part)
+                        if blessing_name:
+                            available.append(blessing_name)
+            else:
+                race_text = race_text.strip().lower()
+                if race_text in RACE_BLESSINGS:
+                    blessing_name = RACE_TO_BLESSING.get(race_text)
+                    if blessing_name:
+                        available.append(blessing_name)
+    
     return list(dict.fromkeys(available))
 
 def send_to_mead(message):
@@ -298,6 +310,23 @@ def apply_blessing(user_id, blessing_type, apostle_user_id):
     except Exception as e:
         return False, f"❌ Ошибка: {e}"
 
+def get_all_apostles_for_user(target_user_id):
+    """Возвращает ВСЕХ активных апостолов"""
+    active_apostles = []
+    
+    for str_user_id, data in apostles_data.items():
+        if data.get('active', False):
+            apostle_id = int(str_user_id)
+            get_cached_apostle_info(apostle_id)
+            voices = data.get('voices', 0) if data else 0
+            
+            active_apostles.append({
+                'user_id': apostle_id,
+                'voices': voices
+            })
+    
+    return active_apostles
+
 def get_sorted_apostles_for_user(target_user_id):
     active_apostles = []
     current_time = time.time()
@@ -322,7 +351,7 @@ def get_sorted_apostles_for_user(target_user_id):
     active_apostles.sort(key=lambda x: (x['is_on_cooldown'], -x['voices']))
     return active_apostles
 
-# ================= ОБРАБОТКА ОЧЕРЕДИ =================
+# ================= 🔥 ИСПРАВЛЕННАЯ ОБРАБОТКА ОЧЕРЕДИ =================
 def process_buff_queue():
     while True:
         try:
@@ -343,24 +372,52 @@ def process_buff_queue():
                     queue_data['current_index'] += 1
                     continue
                 
-                sorted_apostles = get_sorted_apostles_for_user(user_id)
+                # Получаем всех активных апостолов
+                all_apostles = get_all_apostles_for_user(user_id)
                 
-                if not sorted_apostles:
+                if not all_apostles:
                     queue_data['current_index'] += 1
                     queue_data['last_time'] = current_time
+                    send_to_mead(f"⏭️ {blessing_name} пропущен (нет активных апостолов)")
                     continue
                 
-                success = False
+                # 🔥 ФИЛЬТРУЕМ: только апостолы с голосами > 0 и подходящей расой
+                filtered_apostles = []
+                for apostle in all_apostles:
+                    apostle_id = apostle['user_id']
+                    apostle_info = get_apostle_info(apostle_id)
+                    voices = apostle_info.get('voices', 0) if apostle_info else 0
+                    
+                    # Проверяем, есть ли голоса
+                    if voices <= 0:
+                        send_to_mead(f"⏭️ Апостол {apostle_id} пропущен (0 голосов)")
+                        continue
+                    
+                    # Проверяем, может ли апостол наложить этот бафф
+                    apostle_available = get_available_blessings_for_apostle(apostle_id)
+                    if blessing_name in apostle_available:
+                        filtered_apostles.append(apostle)
                 
-                for apostle in sorted_apostles:
+                if not filtered_apostles:
+                    queue_data['current_index'] += 1
+                    queue_data['last_time'] = current_time
+                    send_to_mead(f"⏭️ {blessing_name} пропущен (нет подходящих апостолов с голосами)")
+                    continue
+                
+                # Проверяем, есть ли свободный подходящий апостол
+                free_apostle = None
+                for apostle in filtered_apostles:
                     apostle_id = apostle['user_id']
                     str_apostle_id = str(apostle_id)
                     
-                    # 🔥 УБИРАЕМ ПРОВЕРКУ НА РАСУ — все апостолы могут накладывать любые баффы
-                    
-                    if str_apostle_id in apostle_cooldowns:
-                        if current_time - apostle_cooldowns[str_apostle_id] < 60:
-                            continue
+                    if str_apostle_id not in apostle_cooldowns or current_time - apostle_cooldowns[str_apostle_id] >= 60:
+                        free_apostle = apostle
+                        break
+                
+                if free_apostle:
+                    # Есть свободный — накладываем
+                    apostle_id = free_apostle['user_id']
+                    str_apostle_id = str(apostle_id)
                     
                     success, result = apply_blessing(user_id, bless_type, apostle_id)
                     
@@ -371,30 +428,28 @@ def process_buff_queue():
                         
                         remaining = len(queue_data['blessings']) - queue_data['current_index']
                         send_to_mead(f"✅ {blessing_name} наложен апостолом {apostle_id}! Осталось: {remaining}")
-                        success = True
-                        break
                     elif result and "уже действует" in str(result):
                         queue_data['current_index'] += 1
                         queue_data['last_time'] = current_time
                         send_to_mead(f"⏭️ {blessing_name} пропущен (уже действует)")
-                        success = True
-                        break
-                    else:
-                        continue
-                
-                if not success:
-                    all_on_cooldown = all(
-                        str(ap['user_id']) in apostle_cooldowns and 
-                        current_time - apostle_cooldowns[str(ap['user_id'])] < 60
-                        for ap in sorted_apostles
-                    )
-                    
-                    if all_on_cooldown:
-                        time.sleep(5)
                     else:
                         queue_data['current_index'] += 1
                         queue_data['last_time'] = current_time
-                        send_to_mead(f"⏭️ {blessing_name} пропущен")
+                        send_to_mead(f"⏭️ {blessing_name} пропущен (ошибка)")
+                else:
+                    # Нет свободных — ждём
+                    min_wait = 60
+                    for apostle in filtered_apostles:
+                        apostle_id = apostle['user_id']
+                        str_apostle_id = str(apostle_id)
+                        if str_apostle_id in apostle_cooldowns:
+                            wait_time = 60 - (current_time - apostle_cooldowns[str_apostle_id])
+                            if wait_time > 0:
+                                min_wait = min(min_wait, wait_time)
+                    
+                    wait_time = min(min_wait, 60)
+                    time.sleep(wait_time + 1)
+                    send_to_mead(f"⏳ Ждём освобождения апостола для {blessing_name} ({int(wait_time)} сек)")
             
             time.sleep(2)
         except Exception as e:
@@ -477,12 +532,11 @@ def main():
         queue_thread.start()
         logger.info("📋 Запущен поток обработки очереди")
 
-        send_to_mead("🦝 **Бот запущен!**\n\n✅ Все расовые баффы доступны")
+        send_to_mead("🦝 **Бот запущен!**\n\n✅ Апостолы с 0 голосов пропускаются")
 
         logger.info("✅ Бот запущен!")
-        logger.info("📌 Все расовые баффы доступны для наложения")
-        logger.info("📌 Свободные апостолы накладывают баффы подряд (без КД)")
-        logger.info("📌 Занятые апостолы ждут 60 секунд")
+        logger.info("📌 Апостолы с 0 голосов НЕ накладывают баффы")
+        logger.info("📌 КД между баффами: 60 секунд")
         logger.info("📌 Команды:")
         logger.info("   • +апостол [токен] — активировать")
         logger.info("   • -апостол — отключить")
@@ -501,6 +555,8 @@ def main():
                     msg = message_text.lower().strip()
                     
                     logger.info(f"💬 Получено: '{msg}' от {user_id}")
+
+                    available = get_available_blessings_for_target(user_id)
 
                     if msg.startswith('+апостол'):
                         parts = msg.split()
@@ -595,7 +651,6 @@ def main():
                         send_reply_to_chat(vk, peer_id, response, reply_to=message_id)
 
                     elif msg.startswith('баф'):
-                        available = get_available_blessings(user_id)
                         blessings = parse_blessings(msg, available)
                         
                         if not blessings:
@@ -631,7 +686,7 @@ def main():
                             "📩 `+апостол [токен]` — активировать апостола\n"
                             "⛔ `-апостол` — отключить апостола\n"
                             "🔊 `голоса` — список апостолов\n\n"
-                            "🔥 **Баффы (все расовые баффы доступны):**\n"
+                            "🔥 **Баффы (апостолы с 0 голосов пропускаются):**\n"
                             "• `баф а` — атака\n"
                             "• `баф з` — защита\n"
                             "• `баф у` — удача\n"
