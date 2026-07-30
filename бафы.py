@@ -13,13 +13,7 @@ import atexit
 # ================= КОНФИГУРАЦИЯ =================
 TOKEN = "vk1.a.pWAMTUhJkodcMkUFpCa-UMg_6DKXwr6ISV863itpGw410z1RVSyawnce0r8wMMho0eD5rtIVnrITM22tQbnuqGtnJBZfH5FLopBeT33UG0AUbJI_cEJVbcJEAvOs34dt3PfAA0yiL0sjgabDA88ll9GRCB2nyxiywcI5286nSS-Db2Rn5AAzgp3nkzXfWzkLc4Xf-_vPgUu7pMVJc490Vw"
 GROUP_ID = 239699656
-MEAD_ID = 212887447  # Екатерина Наумова
-
-# 🔥 КОММЕНТИРУЕМ ПРИВЯЗКУ К ЧАТАМ
-# ALLOWED_CHATS = [
-#     171,  # https://vk.ru/im/convo/2000000171
-#     173   # https://vk.ru/im/convo/2000000173
-# ]
+MEAD_ID = 212887447
 
 DATA_FILE = "apostles_data.json"
 LOCK_FILE = "bot.lock"
@@ -239,6 +233,7 @@ def get_cached_apostle_info(user_id, force=False):
     except Exception as e:
         return cache['data']
 
+# ================= 🔥 КАЖДЫЙ АПОСТОЛ НАКЛАДЫВАЕТ ТОЛЬКО СВОЮ РАСУ =================
 def get_available_blessings(user_id):
     available = list(BASE_BLESSINGS.keys())
 
@@ -263,7 +258,6 @@ def get_available_blessings(user_id):
 
     return list(dict.fromkeys(available))
 
-# ================= ОТПРАВКА В ЛИЧКУ =================
 def send_to_mead(message):
     try:
         vk_session = vk_api.VkApi(token=TOKEN)
@@ -278,11 +272,15 @@ def send_to_mead(message):
         logger.error(f"Ошибка отправки: {e}")
         return False
 
-# ================= ФУНКЦИЯ НАЛОЖЕНИЯ =================
 def apply_blessing(user_id, blessing_type, apostle_user_id):
     token = get_apostle_token(apostle_user_id)
     if not token or not is_apostle_active(apostle_user_id):
         return False, f"❌ Апостол {apostle_user_id} не активен!"
+
+    # 🔥 ПРОВЕРЯЕМ, МОЖЕТ ЛИ АПОСТОЛ НАЛОЖИТЬ ЭТОТ БАФФ
+    apostle_available = get_available_blessings(apostle_user_id)
+    if blessing_name not in apostle_available:
+        return False, f"❌ Апостол {apostle_user_id} не может наложить {blessing_type}"
 
     try:
         response = requests.post(
@@ -336,10 +334,11 @@ def get_sorted_apostles_for_user(target_user_id):
                 'is_on_cooldown': is_on_cooldown
             })
 
+    # Сначала свободные, потом по голосам
     active_apostles.sort(key=lambda x: (x['is_on_cooldown'], -x['voices']))
     return active_apostles
 
-# ================= ОБРАБОТКА ОЧЕРЕДИ =================
+# ================= 🔥 ИСПРАВЛЕННАЯ ОБРАБОТКА ОЧЕРЕДИ =================
 def process_buff_queue():
     while True:
         try:
@@ -351,9 +350,6 @@ def process_buff_queue():
                 
                 if queue_data['current_index'] >= len(queue_data['blessings']):
                     del buff_queue[str_user_id]
-                    continue
-                
-                if current_time - queue_data['last_time'] < 60:
                     continue
                 
                 blessing_name = queue_data['blessings'][queue_data['current_index']]
@@ -370,62 +366,58 @@ def process_buff_queue():
                     queue_data['last_time'] = current_time
                     continue
                 
-                apostle = sorted_apostles[0]
-                apostle_id = apostle['user_id']
-                str_apostle_id = str(apostle_id)
+                success = False
                 
-                if str_apostle_id in apostle_cooldowns:
-                    if current_time - apostle_cooldowns[str_apostle_id] < 60:
-                        for ap in sorted_apostles:
-                            ap_id = ap['user_id']
-                            str_ap_id = str(ap_id)
-                            if str_ap_id not in apostle_cooldowns or current_time - apostle_cooldowns[str_ap_id] >= 60:
-                                apostle = ap
-                                apostle_id = ap_id
-                                str_apostle_id = str_ap_id
-                                break
-                        else:
-                            queue_data['last_time'] = current_time
-                            continue
-                
-                success, result = apply_blessing(user_id, bless_type, apostle_id)
-                
-                if success:
-                    apostle_cooldowns[str_apostle_id] = time.time()
-                    queue_data['current_index'] += 1
-                    queue_data['last_time'] = current_time
-                    remaining = len(queue_data['blessings']) - queue_data['current_index']
-                    send_to_mead(f"✅ {blessing_name} наложен! Осталось: {remaining}")
-                elif result and "уже действует" in str(result):
-                    queue_data['current_index'] += 1
-                    queue_data['last_time'] = current_time
-                    send_to_mead(f"⏭️ {blessing_name} пропущен (уже действует)")
-                else:
-                    found = False
-                    for ap in sorted_apostles:
-                        if ap['user_id'] == apostle_id:
-                            continue
-                        ap_id = ap['user_id']
-                        str_ap_id = str(ap_id)
-                        
-                        if str_ap_id in apostle_cooldowns:
-                            if current_time - apostle_cooldowns[str_ap_id] < 60:
-                                continue
-                        
-                        success2, result2 = apply_blessing(user_id, bless_type, ap_id)
-                        if success2:
-                            apostle_cooldowns[str_ap_id] = time.time()
-                            queue_data['current_index'] += 1
-                            queue_data['last_time'] = current_time
-                            remaining = len(queue_data['blessings']) - queue_data['current_index']
-                            send_to_mead(f"✅ {blessing_name} наложен апостолом {ap_id}! Осталось: {remaining}")
-                            found = True
-                            break
+                # Пробуем наложить каждым свободным апостолом
+                for apostle in sorted_apostles:
+                    apostle_id = apostle['user_id']
+                    str_apostle_id = str(apostle_id)
                     
-                    if not found:
+                    # Проверяем, может ли апостол наложить ЭТОТ бафф
+                    apostle_available = get_available_blessings(apostle_id)
+                    if blessing_name not in apostle_available:
+                        continue
+                    
+                    # Проверяем КД апостола
+                    if str_apostle_id in apostle_cooldowns:
+                        if current_time - apostle_cooldowns[str_apostle_id] < 60:
+                            continue
+                    
+                    success, result = apply_blessing(user_id, bless_type, apostle_id)
+                    
+                    if success:
+                        apostle_cooldowns[str_apostle_id] = time.time()
                         queue_data['current_index'] += 1
                         queue_data['last_time'] = current_time
-                        send_to_mead(f"⏭️ {blessing_name} пропущен")
+                        
+                        remaining = len(queue_data['blessings']) - queue_data['current_index']
+                        send_to_mead(f"✅ {blessing_name} наложен апостолом {apostle_id}! Осталось: {remaining}")
+                        success = True
+                        break
+                    elif result and "уже действует" in str(result):
+                        queue_data['current_index'] += 1
+                        queue_data['last_time'] = current_time
+                        send_to_mead(f"⏭️ {blessing_name} пропущен (уже действует)")
+                        success = True
+                        break
+                    else:
+                        continue
+                
+                if not success:
+                    # Все ли апостолы на КД?
+                    all_on_cooldown = all(
+                        str(ap['user_id']) in apostle_cooldowns and 
+                        current_time - apostle_cooldowns[str(ap['user_id'])] < 60
+                        for ap in sorted_apostles
+                    )
+                    
+                    if all_on_cooldown:
+                        # Все на КД — ждём 5 секунд
+                        time.sleep(5)
+                    else:
+                        queue_data['current_index'] += 1
+                        queue_data['last_time'] = current_time
+                        send_to_mead(f"⏭️ {blessing_name} пропущен (не подходит ни одному апостолу)")
             
             time.sleep(2)
         except Exception as e:
@@ -504,16 +496,16 @@ def main():
         vk = vk_session.get_api()
         longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 
-        # Запускаем обработку очереди
         queue_thread = threading.Thread(target=process_buff_queue, daemon=True)
         queue_thread.start()
         logger.info("📋 Запущен поток обработки очереди")
 
-        # Авто-сообщение Екатерине о запуске
-        send_to_mead("🦝 **Бот запущен!**\n\n✅ Готов к работе!\n📌 Бот работает во всех чатах (привязка удалена)")
+        send_to_mead("🦝 **Бот запущен!**\n\n✅ Каждый апостол накладывает ТОЛЬКО свою расу\n✅ Свободные апостолы накладывают баффы подряд без КД")
 
         logger.info("✅ Бот запущен!")
-        logger.info("📌 Бот работает ВО ВСЕХ ЧАТАХ (привязка удалена)")
+        logger.info("📌 Каждый апостол накладывает ТОЛЬКО свою расу")
+        logger.info("📌 Свободные апостолы накладывают баффы подряд (без КД)")
+        logger.info("📌 Занятые апостолы ждут 60 секунд")
         logger.info("📌 Команды:")
         logger.info("   • +апостол [токен] — активировать")
         logger.info("   • -апостол — отключить")
@@ -529,12 +521,9 @@ def main():
                     message_id = event.message.id
                     peer_id = event.message.peer_id
                     
-                    # 🔥 ПРИВЯЗКА К ЧАТАМ УДАЛЕНА — бот работает во всех чатах!
-                    
                     msg = message_text.lower().strip()
                     
-                    # Логируем для отладки
-                    logger.info(f"💬 Получено сообщение: '{msg}' от {user_id} (peer_id: {peer_id})")
+                    logger.info(f"💬 Получено: '{msg}' от {user_id}")
 
                     if msg.startswith('+апостол'):
                         parts = msg.split()
@@ -665,7 +654,7 @@ def main():
                             "📩 `+апостол [токен]` — активировать апостола\n"
                             "⛔ `-апостол` — отключить апостола\n"
                             "🔊 `голоса` — список апостолов\n\n"
-                            "🔥 **Баффы (автоматическая очередь, КД 60 сек):**\n"
+                            "🔥 **Баффы (каждый апостол накладывает ТОЛЬКО свою расу):**\n"
                             "• `баф а` — атака\n"
                             "• `баф з` — защита\n"
                             "• `баф у` — удача\n"
