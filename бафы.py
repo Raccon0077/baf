@@ -79,7 +79,7 @@ def load_apostles():
         try:
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 apostles_data = json.load(f)
-                # 🔥 УДАЛЯЕМ ЕКАТЕРИНУ ИЗ АПОСТОЛОВ
+                # Удаляем Екатерину из апостолов
                 if "212887447" in apostles_data:
                     del apostles_data["212887447"]
                     save_apostles()
@@ -110,7 +110,7 @@ def save_apostles():
                 logger.error(f"   ❌ Ошибка чтения файла: {e}")
                 existing_data = {}
         
-        # 🔥 УДАЛЯЕМ ЕКАТЕРИНУ ПРИ СОХРАНЕНИИ
+        # Удаляем Екатерину при сохранении
         if "212887447" in existing_data:
             del existing_data["212887447"]
         
