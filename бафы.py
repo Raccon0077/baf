@@ -456,6 +456,7 @@ def process_buff_queue():
             logger.error(f"Ошибка обработки очереди: {e}")
             time.sleep(10)
 
+# ================= 🔥 ИСПРАВЛЕННАЯ ФУНКЦИЯ ПАРСИНГА =================
 def parse_blessings(text, available):
     text = text.lower().strip()
     for prefix in ['баф ', 'баф']:
@@ -466,27 +467,44 @@ def parse_blessings(text, available):
         return []
 
     found = []
-    remaining = text
-
-    for name in available:
-        if name in remaining:
-            found.append(name)
-            remaining = remaining.replace(name, '').strip()
-
-    for shortcut, name in sorted(SHORTCUTS.items(), key=lambda x: -len(x[0])):
-        if shortcut in remaining:
-            if name in available and name not in found:
-                found.append(name)
-                remaining = remaining.replace(shortcut, '').strip()
-
+    
+    # 🔥 ПРОХОДИМ ПОСИМВОЛЬНО — так сохраняется порядок!
+    i = 0
+    while i < len(text):
+        # Пробуем найти самый длинный бафф (например "удачи" длиннее "у")
+        matched = False
+        
+        # Сначала проверяем полные названия (по убыванию длины)
+        for name in available:
+            if text[i:].startswith(name):
+                if name not in found:
+                    found.append(name)
+                    i += len(name)
+                    matched = True
+                    break
+        
+        if not matched:
+            # Проверяем сокращения
+            for shortcut, name in SHORTCUTS.items():
+                if text[i:].startswith(shortcut):
+                    if name in available and name not in found:
+                        found.append(name)
+                        i += len(shortcut)
+                        matched = True
+                        break
+        
+        if not matched:
+            i += 1  # пропускаем неизвестный символ
+    
+    # Если ничего не нашли — пробуем старый метод как fallback
     if not found:
         for char in text:
             if char in SHORTCUTS:
                 shortcut_name = SHORTCUTS[char]
                 if shortcut_name in available and shortcut_name not in found:
                     found.append(shortcut_name)
-
-    return list(dict.fromkeys(found))
+    
+    return found  # 🔥 Порядок сохранён!
 
 def send_reply_to_chat(vk, peer_id, message, reply_to=None):
     try:
@@ -532,7 +550,7 @@ def main():
         queue_thread.start()
         logger.info("📋 Запущен поток обработки очереди")
 
-        send_to_mead("🦝 **Бот запущен!**\n\n✅ Апостолы с 0 голосов пропускаются")
+        send_to_mead("🦝 **Бот запущен!**\n\n✅ Апостолы с 0 голосов пропускаются\n✅ Баффы накладываются в порядке ввода")
 
         logger.info("✅ Бот запущен!")
         logger.info("📌 Апостолы с 0 голосов НЕ накладывают баффы")
@@ -541,7 +559,7 @@ def main():
         logger.info("   • +апостол [токен] — активировать")
         logger.info("   • -апостол — отключить")
         logger.info("   • голоса — список апостолов")
-        logger.info("   • баф [буквы] — наложить баффы")
+        logger.info("   • баф [буквы] — наложить баффы в порядке ввода")
         logger.info("=" * 50)
 
         for event in longpoll.listen():
@@ -698,8 +716,8 @@ def main():
                             "• `баф д` — демон\n"
                             "• `баф н` — нежить\n\n"
                             "📋 **Примеры:**\n"
-                            "• `баф уаз` — удача, атака, защита\n"
-                            "• `баф уазэ` — удача, атака, защита, эльф"
+                            "• `баф уаз` — удача, атака, защита (в этом порядке)\n"
+                            "• `баф уазэ` — удача, атака, защита, эльф (в этом порядке)"
                         )
                         send_reply_to_chat(vk, peer_id, help_text, reply_to=message_id)
 
