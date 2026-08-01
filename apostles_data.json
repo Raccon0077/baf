@@ -7,14 +7,4 @@
     "level": 160,
     "max_voices": 71,
     "race": "человек-эльф"
-  },
-  "212887447": {
-    "token": "wd1_live_0xPVySObEMVvXXJvDfoMxbUqUVd9NSKSCmhy8I4eY0dTqUrTeIvIVIL93WhGV4AK",
-    "active": true,
-    "name": "Динар Галеев",
-    "voices": 56,
-    "level": 550,
-    "max_voices": 92,
-    "race": "человек-гоблин"
   }
-}
