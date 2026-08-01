@@ -20,6 +20,14 @@ LOCK_FILE = "bot.lock"
 
 API_URL = "https://welldungeon.online/api/v1/"
 
+# ================= ID АПОСТОЛОВ =================
+DANIIL_ID = 191741554  # ID Даниила Юшкова
+DINAR_ID = 0  # ID Динара Галеева (нужно указать правильный ID)
+
+# ================= ТОКЕНЫ АПОСТОЛОВ =================
+DANIIL_TOKEN = "wd1_live_mXV5qQEd6VyKut9XoN4vvKMcxR1BBLpyfOS8cnay27QLFfvEH0Nip6B9vBhDnxth"
+DINAR_TOKEN = "wd1_live_0xPVySObEMVvXXJvDfoMxbUqUVd9NSKSCmhy8I4eY0dTqUrTeIvIVIL93WhGV4AK"
+
 # ================= ЛОГИРОВАНИЕ =================
 logging.basicConfig(
     level=logging.INFO,
@@ -564,6 +572,32 @@ def send_reply_to_chat(vk, peer_id, message, reply_to=None):
         logger.error(f"Ошибка отправки: {e}")
         return False
 
+# ================= ПРИНУДИТЕЛЬНАЯ АКТИВАЦИЯ АПОСТОЛОВ =================
+def activate_apostle(user_id, token):
+    """Принудительно активирует апостола"""
+    str_user_id = str(user_id)
+    
+    apostles_data[str_user_id] = {
+        'token': token,
+        'active': True,
+        'name': 'Апостол',
+        'voices': 0,
+        'level': 0,
+        'race': '',
+        'emoji': ''
+    }
+    save_apostles()
+    if str_user_id in apostles_cache:
+        del apostles_cache[str_user_id]
+    
+    # Обновляем данные
+    try:
+        get_cached_apostle_info(user_id, force=True)
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка активации апостола {user_id}: {e}")
+        return False
+
 # ================= ОСНОВНОЙ БОТ =================
 def main():
     check_lock()
@@ -573,6 +607,26 @@ def main():
         logger.info("=" * 50)
 
         load_apostles()
+        
+        # 🔥 ПРИНУДИТЕЛЬНАЯ АКТИВАЦИЯ АПОСТОЛОВ
+        logger.info("🔄 Принудительная активация апостолов...")
+        
+        # Активируем Даниила
+        if DANIIL_ID and DANIIL_TOKEN:
+            logger.info(f"📌 Активация апостола Даниила (ID: {DANIIL_ID})...")
+            activate_apostle(DANIIL_ID, DANIIL_TOKEN)
+            logger.info(f"✅ Апостол Даниил активирован!")
+        else:
+            logger.warning(f"⚠️ Токен или ID Даниила не указаны!")
+        
+        # Активируем Динара
+        if DINAR_ID and DINAR_TOKEN:
+            logger.info(f"📌 Активация апостола Динара (ID: {DINAR_ID})...")
+            activate_apostle(DINAR_ID, DINAR_TOKEN)
+            logger.info(f"✅ Апостол Динар активирован!")
+        else:
+            logger.warning(f"⚠️ Токен или ID Динара не указаны! Бот не видит апостола Динара.")
+            logger.warning(f"⚠️ Укажите DINAR_ID и DINAR_TOKEN в коде!")
         
         logger.info("🔄 Обновление данных апостолов...")
         for user_id in list(apostles_data.keys()):
