@@ -473,8 +473,7 @@ def process_buff_queue():
                         queue_data['last_time'] = current_time
                         
                         remaining = len(queue_data['blessings']) - queue_data['current_index']
-                        priority_text = "🔵" if voices >= 10 else "🟡 (мало голосов)"
-                        send_to_mead(f"✅ {blessing_name} наложен апостолом {apostle_id} {priority_text}! Осталось: {remaining}")
+                        send_to_mead(f"✅ {blessing_name} наложен апостолом {apostle_id} (голосов: {voices})! Осталось: {remaining}")
                     elif result and "уже действует" in str(result):
                         queue_data['current_index'] += 1
                         queue_data['last_time'] = current_time
@@ -718,16 +717,8 @@ def main():
                                 # Получаем смайлик апостола
                                 emoji = get_apostle_emoji(user_id_int)
                                 
-                                # Определяем цветовой индикатор
-                                if voices >= 10:
-                                    indicator = "🔵"
-                                elif voices > 0:
-                                    indicator = "🟡"
-                                else:
-                                    indicator = "⚫"
-                                
-                                # 🔥 ФОРМАТ: индикатор смайлик раса/имя голоса
-                                apostles_list.append(f"{indicator} {emoji} {race_short}/{name} {voices}")
+                                # 🔥 ФОРМАТ: смайлик раса/имя голоса (БЕЗ ЦВЕТНЫХ КРУГОВ)
+                                apostles_list.append(f"{emoji} {race_short}/{name} {voices}")
                         
                         if apostles_list:
                             response = "🔊 **Голоса:**\n\n" + "\n".join(apostles_list)
@@ -800,9 +791,9 @@ def main():
                             "⛔ `-апостол` — отключить апостола\n"
                             "🔊 `голоса` — список апостолов\n\n"
                             "🔥 **Приоритет баффов:**\n"
-                            "• 🔵 **10+ голосов** — могут накладывать ЛЮБЫЕ баффы\n"
-                            "• 🟡 **1-9 голосов** — могут накладывать ТОЛЬКО РАСОВЫЕ баффы\n"
-                            "• ⚫ **0 голосов** — НЕ работают\n\n"
+                            "• 10+ голосов — могут накладывать ЛЮБЫЕ баффы\n"
+                            "• 1-9 голосов — могут накладывать ТОЛЬКО РАСОВЫЕ баффы\n"
+                            "• 0 голосов — НЕ работают\n\n"
                             "📋 **Команды баффов:**\n"
                             "• `баф а` — атака\n"
                             "• `баф з` — защита\n"
