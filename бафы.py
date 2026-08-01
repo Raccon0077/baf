@@ -67,6 +67,44 @@ apostles_cache = {}
 apostle_cooldowns = {}
 buff_queue = {}
 
+# ================= 🎲 СЛУЧАЙНЫЕ СМАЙЛИКИ ДЛЯ АПОСТОЛОВ =================
+APOSTLE_EMOJIS = [
+    "🦊", "🐺", "🐉", "🦄", "🐲", "🦅", "🦇", "🐋", "🦈", "🐊",
+    "🦍", "🐘", "🦏", "🐃", "🐆", "🐅", "🦁", "🐯", "🦒", "🦌",
+    "🐕", "🐩", "🐈", "🐇", "🦝", "🦡", "🦫", "🦦", "🐿️", "🦔",
+    "🦉", "🦜", "🐧", "🐦", "🦚", "🦩", "🕊️", "🦢", "🦃", "🐓",
+    "🐞", "🦋", "🐝", "🐜", "🦟", "🦗", "🐌", "🐛", "🐚", "🪸"
+]
+
+def get_apostle_emoji(user_id):
+    """Возвращает закреплённый смайлик для апостола или генерирует новый"""
+    str_user_id = str(user_id)
+    apostle = get_apostle_info(user_id)
+    
+    if apostle and 'emoji' in apostle and apostle['emoji']:
+        return apostle['emoji']
+    
+    # Генерируем новый смайлик
+    if apostle:
+        # Проверяем, какие смайлики уже заняты
+        used_emojis = set()
+        for data in apostles_data.values():
+            if 'emoji' in data and data['emoji']:
+                used_emojis.add(data['emoji'])
+        
+        available_emojis = [e for e in APOSTLE_EMOJIS if e not in used_emojis]
+        
+        if available_emojis:
+            emoji = random.choice(available_emojis)
+        else:
+            emoji = random.choice(APOSTLE_EMOJIS)  # Если все заняты
+        
+        apostle['emoji'] = emoji
+        save_apostles()
+        return emoji
+    
+    return "🦝"  # Дефолтный
+
 # ================= ЗАГРУЗКА И СОХРАНЕНИЕ =================
 def load_apostles():
     global apostles_data
@@ -327,7 +365,6 @@ def get_all_apostles_for_user(target_user_id):
     
     return active_apostles
 
-# ================= 🔥 НОВАЯ ФУНКЦИЯ ПРИОРИТЕТА =================
 def get_prioritized_apostles_for_buff(target_user_id, blessing_name):
     """
     Возвращает список апостолов, отсортированных по приоритету:
@@ -349,7 +386,7 @@ def get_prioritized_apostles_for_buff(target_user_id, blessing_name):
         if blessing_name not in apostle_available:
             continue
         
-        # 🔥 ПРОВЕРКА ПРИОРИТЕТА
+        # Проверка приоритета
         if voices >= 10:
             # Может накладывать любые баффы
             prioritized.append({
@@ -374,7 +411,7 @@ def get_prioritized_apostles_for_buff(target_user_id, blessing_name):
     
     return prioritized
 
-# ================= 🔥 ОБНОВЛЁННАЯ ОБРАБОТКА ОЧЕРЕДИ =================
+# ================= ОБРАБОТКА ОЧЕРЕДИ =================
 def process_buff_queue():
     while True:
         try:
@@ -395,7 +432,7 @@ def process_buff_queue():
                     queue_data['current_index'] += 1
                     continue
                 
-                # 🔥 ПОЛУЧАЕМ АПОСТОЛОВ С ПРИОРИТЕТОМ
+                # Получаем апостолов с приоритетом
                 prioritized_apostles = get_prioritized_apostles_for_buff(user_id, blessing_name)
                 
                 if not prioritized_apostles:
@@ -604,7 +641,8 @@ def main():
                                     'name': 'Апостол',
                                     'voices': 0,
                                     'level': 0,
-                                    'race': ''
+                                    'race': '',
+                                    'emoji': ''  # Будет заполнено при первом вызове
                                 }
                                 save_apostles()
                                 if str_user_id in apostles_cache:
@@ -614,6 +652,8 @@ def main():
                                     check_response = get_with_retry(f"{API_URL}TokenInfo?token={token}")
                                     if check_response and check_response.get('result') == 1:
                                         get_cached_apostle_info(user_id, force=True)
+                                        # Генерируем смайлик
+                                        get_apostle_emoji(user_id)
                                         send_to_mead(f"🦝 **Апостол активирован для @id{user_id}!")
                                         send_reply_to_chat(vk, peer_id, "✅ Апостол активирован!", reply_to=message_id)
                                     else:
@@ -650,7 +690,7 @@ def main():
                         for str_user_id, data in apostles_data.items():
                             if data.get('active', False):
                                 user_id_int = int(str_user_id)
-                                get_cached_apostle_info(user_id_int, force=True)
+                                info = get_cached_apostle_info(user_id_int, force=True)
                                 name = data.get('name', f"Апостол_{user_id_int}")
                                 voices = data.get('voices', 0)
                                 race_text = data.get('race', '')
@@ -675,13 +715,22 @@ def main():
                                             short_parts.append(race_map[part])
                                     race_short = "/".join(short_parts) if short_parts else race_text
                                 
-                                # Добавляем индикатор голосов
-                                voice_indicator = "🔵" if voices >= 10 else "🟡" if voices > 0 else "⚫"
-                                apostles_list.append(f"{voice_indicator} {race_short} {name} {voices}")
+                                # Получаем смайлик апостола
+                                emoji = get_apostle_emoji(user_id_int)
+                                
+                                # Определяем цветовой индикатор
+                                if voices >= 10:
+                                    indicator = "🔵"
+                                elif voices > 0:
+                                    indicator = "🟡"
+                                else:
+                                    indicator = "⚫"
+                                
+                                # 🔥 ФОРМАТ: индикатор смайлик раса/имя голоса
+                                apostles_list.append(f"{indicator} {emoji} {race_short}/{name} {voices}")
                         
                         if apostles_list:
-                            response = "🔊 **Голоса:**\n\n" + "\n".join(apostles_list) + \
-                                      "\n\n🔵 — 10+ голосов (любые баффы)\n🟡 — <10 голосов (только расовые)\n⚫ — 0 голосов (не работает)"
+                            response = "🔊 **Голоса:**\n\n" + "\n".join(apostles_list)
                         else:
                             response = "❌ Нет активных апостолов!"
                         send_reply_to_chat(vk, peer_id, response, reply_to=message_id)
