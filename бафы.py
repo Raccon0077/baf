@@ -596,21 +596,19 @@ def main():
         logger.info("📋 Запущен поток обработки очереди")
 
         send_to_mead("🦝 **Бот запущен!**\n\n"
+                    "✅ В ЛС реагирует только на +апостол\n"
+                    "✅ В чатах работает полноценно\n"
                     "✅ Апостолы с 0 голосов пропускаются\n"
                     "✅ Баффы накладываются в порядке ввода\n"
-                    "🔵 Апостолы с 10+ голосов — любые баффы\n"
-                    "🟡 Апостолы с <10 голосов — только расовые")
+                    "✅ У каждого апостола свой уникальный смайлик")
 
         logger.info("✅ Бот запущен!")
+        logger.info("📌 В ЛС — только команда +апостол")
+        logger.info("📌 В чатах — все команды")
         logger.info("📌 Апостолы с 0 голосов НЕ накладывают баффы")
         logger.info("📌 Апостолы с <10 голосов — только расовые баффы")
         logger.info("📌 Апостолы с 10+ голосов — любые баффы")
         logger.info("📌 КД между баффами: 60 секунд")
-        logger.info("📌 Команды:")
-        logger.info("   • +апостол [токен] — активировать")
-        logger.info("   • -апостол — отключить")
-        logger.info("   • голоса — список апостолов")
-        logger.info("   • баф [буквы] — наложить баффы в порядке ввода")
         logger.info("=" * 50)
 
         for event in longpoll.listen():
@@ -623,194 +621,246 @@ def main():
                     
                     msg = message_text.lower().strip()
                     
-                    logger.info(f"💬 Получено: '{msg}' от {user_id}")
+                    # 🔥 ОПРЕДЕЛЯЕМ: личка это или чат
+                    is_private = (peer_id == user_id)
+                    
+                    if is_private:
+                        logger.info(f"💬 Личное сообщение от {user_id}: '{msg}'")
+                        
+                        # 🔥 В ЛИЧКЕ РЕАГИРУЕМ ТОЛЬКО НА +АПОСТОЛ
+                        if msg.startswith('+апостол'):
+                            # Обрабатываем активацию апостола
+                            parts = msg.split()
+                            if len(parts) >= 2:
+                                token = parts[1]
+                                if token.startswith('wd1_live_'):
+                                    str_user_id = str(user_id)
+                                    
+                                    apostles_data[str_user_id] = {
+                                        'token': token,
+                                        'active': True,
+                                        'name': 'Апостол',
+                                        'voices': 0,
+                                        'level': 0,
+                                        'race': '',
+                                        'emoji': ''
+                                    }
+                                    save_apostles()
+                                    if str_user_id in apostles_cache:
+                                        del apostles_cache[str_user_id]
 
-                    available = get_available_blessings_for_target(user_id)
+                                    try:
+                                        check_response = get_with_retry(f"{API_URL}TokenInfo?token={token}")
+                                        if check_response and check_response.get('result') == 1:
+                                            get_cached_apostle_info(user_id, force=True)
+                                            emoji = get_apostle_emoji(user_id)
+                                            send_to_mead(f"🦝 **Апостол активирован для @id{user_id}!** Смайлик: {emoji}")
+                                            send_reply_to_chat(vk, peer_id, f"✅ Апостол активирован! Твой смайлик: {emoji}", reply_to=message_id)
+                                        else:
+                                            apostles_data[str_user_id]['active'] = False
+                                            save_apostles()
+                                            send_reply_to_chat(vk, peer_id, "❌ Неверный токен!", reply_to=message_id)
+                                    except Exception as e:
+                                        apostles_data[str_user_id]['active'] = False
+                                        save_apostles()
+                                        send_reply_to_chat(vk, peer_id, f"❌ Ошибка: {e}", reply_to=message_id)
+                                else:
+                                    send_reply_to_chat(vk, peer_id,
+                                                       "❌ Неверный формат токена! Должен начинаться с `wd1_live_`",
+                                                       reply_to=message_id)
+                            else:
+                                send_reply_to_chat(vk, peer_id,
+                                                   "❌ Укажи токен!\nПример: `+апостол wd1_live_...`",
+                                                   reply_to=message_id)
+                        else:
+                            # 🔥 ВСЕ ОСТАЛЬНЫЕ СООБЩЕНИЯ В ЛИЧКЕ ИГНОРИРУЕМ
+                            logger.info(f"💬 Личное сообщение от {user_id} проигнорировано (не +апостол)")
+                            continue
+                    else:
+                        # 🔥 В ЧАТАХ РАБОТАЕМ ПОЛНОСТЬЮ
+                        logger.info(f"💬 Получено: '{msg}' от {user_id} в чате {peer_id}")
 
-                    if msg.startswith('+апостол'):
-                        parts = msg.split()
-                        if len(parts) >= 2:
-                            token = parts[1]
-                            if token.startswith('wd1_live_'):
-                                str_user_id = str(user_id)
-                                
-                                apostles_data[str_user_id] = {
-                                    'token': token,
-                                    'active': True,
-                                    'name': 'Апостол',
-                                    'voices': 0,
-                                    'level': 0,
-                                    'race': '',
-                                    'emoji': ''  # Будет заполнено при первом вызове
-                                }
+                        available = get_available_blessings_for_target(user_id)
+
+                        if msg.startswith('+апостол'):
+                            parts = msg.split()
+                            if len(parts) >= 2:
+                                token = parts[1]
+                                if token.startswith('wd1_live_'):
+                                    str_user_id = str(user_id)
+                                    
+                                    apostles_data[str_user_id] = {
+                                        'token': token,
+                                        'active': True,
+                                        'name': 'Апостол',
+                                        'voices': 0,
+                                        'level': 0,
+                                        'race': '',
+                                        'emoji': ''
+                                    }
+                                    save_apostles()
+                                    if str_user_id in apostles_cache:
+                                        del apostles_cache[str_user_id]
+
+                                    try:
+                                        check_response = get_with_retry(f"{API_URL}TokenInfo?token={token}")
+                                        if check_response and check_response.get('result') == 1:
+                                            get_cached_apostle_info(user_id, force=True)
+                                            emoji = get_apostle_emoji(user_id)
+                                            send_to_mead(f"🦝 **Апостол активирован для @id{user_id}!** Смайлик: {emoji}")
+                                            send_reply_to_chat(vk, peer_id, f"✅ Апостол активирован! Твой смайлик: {emoji}", reply_to=message_id)
+                                        else:
+                                            apostles_data[str_user_id]['active'] = False
+                                            save_apostles()
+                                            send_reply_to_chat(vk, peer_id, "❌ Неверный токен!", reply_to=message_id)
+                                    except Exception as e:
+                                        apostles_data[str_user_id]['active'] = False
+                                        save_apostles()
+                                        send_reply_to_chat(vk, peer_id, f"❌ Ошибка: {e}", reply_to=message_id)
+                                else:
+                                    send_reply_to_chat(vk, peer_id,
+                                                       "❌ Неверный формат токена! Должен начинаться с `wd1_live_`",
+                                                       reply_to=message_id)
+                            else:
+                                send_reply_to_chat(vk, peer_id,
+                                                   "❌ Укажи токен!\nПример: `+апостол wd1_live_...`",
+                                                   reply_to=message_id)
+
+                        elif msg == '-апостол':
+                            str_user_id = str(user_id)
+                            if str_user_id in apostles_data:
+                                apostles_data[str_user_id]['active'] = False
                                 save_apostles()
                                 if str_user_id in apostles_cache:
                                     del apostles_cache[str_user_id]
-
-                                try:
-                                    check_response = get_with_retry(f"{API_URL}TokenInfo?token={token}")
-                                    if check_response and check_response.get('result') == 1:
-                                        get_cached_apostle_info(user_id, force=True)
-                                        # Генерируем смайлик
-                                        get_apostle_emoji(user_id)
-                                        send_to_mead(f"🦝 **Апостол активирован для @id{user_id}!")
-                                        send_reply_to_chat(vk, peer_id, "✅ Апостол активирован!", reply_to=message_id)
-                                    else:
-                                        apostles_data[str_user_id]['active'] = False
-                                        save_apostles()
-                                        send_reply_to_chat(vk, peer_id, "❌ Неверный токен!", reply_to=message_id)
-                                except Exception as e:
-                                    apostles_data[str_user_id]['active'] = False
-                                    save_apostles()
-                                    send_reply_to_chat(vk, peer_id, f"❌ Ошибка: {e}", reply_to=message_id)
+                                send_to_mead(f"⛔ **Апостол @id{user_id} отключен!**")
+                                send_reply_to_chat(vk, peer_id, "✅ Апостол отключён!", reply_to=message_id)
                             else:
-                                send_reply_to_chat(vk, peer_id,
-                                                   "❌ Неверный формат токена! Должен начинаться с `wd1_live_`",
-                                                   reply_to=message_id)
-                        else:
-                            send_reply_to_chat(vk, peer_id,
-                                               "❌ Укажи токен!\nПример: `+апостол wd1_live_...`",
-                                               reply_to=message_id)
+                                send_reply_to_chat(vk, peer_id, "❌ У тебя нет активного апостола!", reply_to=message_id)
 
-                    elif msg == '-апостол':
-                        str_user_id = str(user_id)
-                        if str_user_id in apostles_data:
-                            apostles_data[str_user_id]['active'] = False
-                            save_apostles()
-                            if str_user_id in apostles_cache:
-                                del apostles_cache[str_user_id]
-                            send_to_mead(f"⛔ **Апостол @id{user_id} отключен!**")
-                            send_reply_to_chat(vk, peer_id, "✅ Апостол отключён!", reply_to=message_id)
-                        else:
-                            send_reply_to_chat(vk, peer_id, "❌ У тебя нет активного апостола!", reply_to=message_id)
+                        elif msg in ['голоса', 'голос']:
+                            apostles_list = []
+                            for str_user_id, data in apostles_data.items():
+                                if data.get('active', False):
+                                    user_id_int = int(str_user_id)
+                                    info = get_cached_apostle_info(user_id_int, force=True)
+                                    name = data.get('name', f"Апостол_{user_id_int}")
+                                    voices = data.get('voices', 0)
+                                    race_text = data.get('race', '')
+                                    race_short = ""
+                                    
+                                    race_map = {
+                                        "человек": "ч",
+                                        "эльф": "э",
+                                        "орк": "о",
+                                        "гоблин": "г",
+                                        "гном": "в",
+                                        "демон": "д",
+                                        "нежить": "н"
+                                    }
+                                    
+                                    if race_text:
+                                        parts = race_text.split('-')
+                                        short_parts = []
+                                        for part in parts[:2]:
+                                            part = part.strip().lower()
+                                            if part in race_map:
+                                                short_parts.append(race_map[part])
+                                        race_short = "/".join(short_parts) if short_parts else race_text
+                                    
+                                    emoji = get_apostle_emoji(user_id_int)
+                                    apostles_list.append(f"{emoji} {race_short}/{name} {voices}")
+                            
+                            if apostles_list:
+                                response = "🔊 **Голоса:**\n\n" + "\n".join(apostles_list)
+                            else:
+                                response = "❌ Нет активных апостолов!"
+                            send_reply_to_chat(vk, peer_id, response, reply_to=message_id)
 
-                    elif msg in ['голоса', 'голос']:
-                        apostles_list = []
-                        for str_user_id, data in apostles_data.items():
-                            if data.get('active', False):
-                                user_id_int = int(str_user_id)
-                                info = get_cached_apostle_info(user_id_int, force=True)
-                                name = data.get('name', f"Апостол_{user_id_int}")
-                                voices = data.get('voices', 0)
-                                race_text = data.get('race', '')
-                                race_short = ""
-                                
-                                race_map = {
-                                    "человек": "ч",
-                                    "эльф": "э",
-                                    "орк": "о",
-                                    "гоблин": "г",
-                                    "гном": "в",
-                                    "демон": "д",
-                                    "нежить": "н"
+                        elif msg.startswith('баф'):
+                            blessings = parse_blessings(msg, available)
+                            
+                            if not blessings:
+                                send_reply_to_chat(
+                                    vk, peer_id,
+                                    f"❌ Не найдены благословения!\nДоступны: {', '.join(available)}",
+                                    reply_to=message_id
+                                )
+                                continue
+
+                            str_user_id = str(user_id)
+                            if str_user_id not in buff_queue:
+                                buff_queue[str_user_id] = {
+                                    'blessings': blessings,
+                                    'current_index': 0,
+                                    'last_time': 0
                                 }
-                                
-                                if race_text:
-                                    parts = race_text.split('-')
-                                    short_parts = []
-                                    for part in parts[:2]:
-                                        part = part.strip().lower()
-                                        if part in race_map:
-                                            short_parts.append(race_map[part])
-                                    race_short = "/".join(short_parts) if short_parts else race_text
-                                
-                                # Получаем смайлик апостола
-                                emoji = get_apostle_emoji(user_id_int)
-                                
-                                # 🔥 ФОРМАТ: смайлик раса/имя голоса (БЕЗ ЦВЕТНЫХ КРУГОВ)
-                                apostles_list.append(f"{emoji} {race_short}/{name} {voices}")
-                        
-                        if apostles_list:
-                            response = "🔊 **Голоса:**\n\n" + "\n".join(apostles_list)
-                        else:
-                            response = "❌ Нет активных апостолов!"
-                        send_reply_to_chat(vk, peer_id, response, reply_to=message_id)
+                            else:
+                                buff_queue[str_user_id]['blessings'].extend(blessings)
 
-                    elif msg.startswith('баф'):
-                        blessings = parse_blessings(msg, available)
-                        
-                        if not blessings:
+                            queue_count = len(buff_queue[str_user_id]['blessings']) - buff_queue[str_user_id]['current_index']
+                            
+                            low_voice_blessings = []
+                            high_voice_blessings = []
+                            
+                            for blessing in blessings:
+                                has_low = False
+                                has_high = False
+                                for apostle_id, data in apostles_data.items():
+                                    if data.get('active', False):
+                                        voices = data.get('voices', 0)
+                                        apostle_available = get_available_blessings_for_apostle(int(apostle_id))
+                                        if blessing in apostle_available:
+                                            if voices >= 10:
+                                                has_high = True
+                                            elif voices > 0:
+                                                has_low = True
+                                
+                                if has_low and not has_high:
+                                    low_voice_blessings.append(blessing)
+                                elif has_high:
+                                    high_voice_blessings.append(blessing)
+                            
+                            warning = ""
+                            if low_voice_blessings:
+                                warning = f"\n⚠️ {', '.join(low_voice_blessings)} — только через апостолов с <10 голосов"
+                            
                             send_reply_to_chat(
                                 vk, peer_id,
-                                f"❌ Не найдены благословения!\nДоступны: {', '.join(available)}",
+                                f"📋 **Благословения добавлены в очередь!**\n"
+                                f"📌 {', '.join(blessings)}\n"
+                                f"⏳ Всего в очереди: {queue_count}{warning}",
                                 reply_to=message_id
                             )
-                            continue
 
-                        str_user_id = str(user_id)
-                        if str_user_id not in buff_queue:
-                            buff_queue[str_user_id] = {
-                                'blessings': blessings,
-                                'current_index': 0,
-                                'last_time': 0
-                            }
-                        else:
-                            buff_queue[str_user_id]['blessings'].extend(blessings)
-
-                        queue_count = len(buff_queue[str_user_id]['blessings']) - buff_queue[str_user_id]['current_index']
-                        
-                        # Проверяем, какие баффы могут наложить апостолы с <10 голосами
-                        low_voice_blessings = []
-                        high_voice_blessings = []
-                        
-                        for blessing in blessings:
-                            # Проверяем, есть ли апостолы с <10 голосами для этого баффа
-                            has_low = False
-                            has_high = False
-                            for apostle_id, data in apostles_data.items():
-                                if data.get('active', False):
-                                    voices = data.get('voices', 0)
-                                    apostle_available = get_available_blessings_for_apostle(int(apostle_id))
-                                    if blessing in apostle_available:
-                                        if voices >= 10:
-                                            has_high = True
-                                        elif voices > 0:
-                                            has_low = True
-                            
-                            if has_low and not has_high:
-                                low_voice_blessings.append(blessing)
-                            elif has_high:
-                                high_voice_blessings.append(blessing)
-                        
-                        warning = ""
-                        if low_voice_blessings:
-                            warning = f"\n⚠️ {', '.join(low_voice_blessings)} — только через апостолов с <10 голосов"
-                        
-                        send_reply_to_chat(
-                            vk, peer_id,
-                            f"📋 **Благословения добавлены в очередь!**\n"
-                            f"📌 {', '.join(blessings)}\n"
-                            f"⏳ Всего в очереди: {queue_count}{warning}",
-                            reply_to=message_id
-                        )
-
-                    elif msg in ['бот', 'помощь', 'help', '/help']:
-                        help_text = (
-                            "⚔️ **Команды:**\n\n"
-                            "📩 `+апостол [токен]` — активировать апостола\n"
-                            "⛔ `-апостол` — отключить апостола\n"
-                            "🔊 `голоса` — список апостолов\n\n"
-                            "🔥 **Приоритет баффов:**\n"
-                            "• 10+ голосов — могут накладывать ЛЮБЫЕ баффы\n"
-                            "• 1-9 голосов — могут накладывать ТОЛЬКО РАСОВЫЕ баффы\n"
-                            "• 0 голосов — НЕ работают\n\n"
-                            "📋 **Команды баффов:**\n"
-                            "• `баф а` — атака\n"
-                            "• `баф з` — защита\n"
-                            "• `баф у` — удача\n"
-                            "• `баф ч` — человек\n"
-                            "• `баф э` — эльф\n"
-                            "• `баф о` — орк\n"
-                            "• `баф г` — гоблин\n"
-                            "• `баф в` — гном\n"
-                            "• `баф д` — демон\n"
-                            "• `баф н` — нежить\n\n"
-                            "📋 **Примеры:**\n"
-                            "• `баф уаз` — удача, атака, защита (в этом порядке)\n"
-                            "• `баф уазэ` — удача, атака, защита, эльф (в этом порядке)\n\n"
-                            "💡 Апостолы с <10 голосов используют только расовые баффы!"
-                        )
-                        send_reply_to_chat(vk, peer_id, help_text, reply_to=message_id)
+                        elif msg in ['бот', 'помощь', 'help', '/help']:
+                            help_text = (
+                                "⚔️ **Команды:**\n\n"
+                                "📩 `+апостол [токен]` — активировать апостола\n"
+                                "⛔ `-апостол` — отключить апостола\n"
+                                "🔊 `голоса` — список апостолов\n\n"
+                                "🔥 **Приоритет баффов:**\n"
+                                "• 10+ голосов — могут накладывать ЛЮБЫЕ баффы\n"
+                                "• 1-9 голосов — могут накладывать ТОЛЬКО РАСОВЫЕ баффы\n"
+                                "• 0 голосов — НЕ работают\n\n"
+                                "📋 **Команды баффов:**\n"
+                                "• `баф а` — атака\n"
+                                "• `баф з` — защита\n"
+                                "• `баф у` — удача\n"
+                                "• `баф ч` — человек\n"
+                                "• `баф э` — эльф\n"
+                                "• `баф о` — орк\n"
+                                "• `баф г` — гоблин\n"
+                                "• `баф в` — гном\n"
+                                "• `баф д` — демон\n"
+                                "• `баф н` — нежить\n\n"
+                                "📋 **Примеры:**\n"
+                                "• `баф уаз` — удача, атака, защита (в этом порядке)\n"
+                                "• `баф уазэ` — удача, атака, защита, эльф (в этом порядке)\n\n"
+                                "💡 Апостолы с <10 голосов используют только расовые баффы!\n"
+                                "🎯 У каждого апостола свой уникальный смайлик!"
+                            )
+                            send_reply_to_chat(vk, peer_id, help_text, reply_to=message_id)
 
                 except Exception as e:
                     logger.error(f"❌ Ошибка: {e}")
