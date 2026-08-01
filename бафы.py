@@ -22,7 +22,7 @@ API_URL = "https://welldungeon.online/api/v1/"
 
 # ================= ID АПОСТОЛОВ =================
 DANIIL_ID = 191741554  # ID Даниила Юшкова
-DINAR_ID = 0  # ID Динара Галеева (нужно указать правильный ID)
+DINAR_ID = 538693897  # ID Динара Галеева (нужно указать правильный ID)
 
 # ================= ТОКЕНЫ АПОСТОЛОВ =================
 DANIIL_TOKEN = "wd1_live_mXV5qQEd6VyKut9XoN4vvKMcxR1BBLpyfOS8cnay27QLFfvEH0Nip6B9vBhDnxth"
